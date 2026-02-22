@@ -2,8 +2,9 @@ import threading
 import socket
 
 aliase = input("Enter aliase name: ")
+server_ip = input("Enter server IP address: ")
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect(('127.0.0.1', 24680))
+client.connect((server_ip, 24680))
 
 # handle receiving messages
 
