@@ -24,9 +24,10 @@ def client_receive():
 # handle sending messages
 def client_send():
     while True:
-        message = f'{aliase}: {input("")}'
+        text = input("")
+        message = f'{aliase}: {text}'
         client.send(message.encode())
-        if message.lower() == 'exit':
+        if text.lower() == 'exit':
             client.close()
             break
         else:
