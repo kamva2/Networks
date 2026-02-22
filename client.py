@@ -26,12 +26,11 @@ def client_send():
     while True:
         text = input("")
         message = f'{aliase}: {text}'
-        client.send(message.encode())
         if text.lower() == 'exit':
+            client.send(message.encode())
             client.close()
             break
-        else:
-            client.send(message.encode())
+        client.send(message.encode())
 
 receive_thread = threading.Thread(target=client_receive)
 receive_thread.start()
