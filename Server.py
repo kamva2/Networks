@@ -1,5 +1,6 @@
 import socket
 import threading
+import database
 
 host = '0.0.0.0'
 port = 12345
@@ -11,7 +12,6 @@ server.listen()
 #We keeping track of people who have connected to the server with their aliase and the port
 clients = []
 aliases = []
-dict = {}
 
 #Have to broadcast a message for the chat box or clients that are connected
 def broadcast(message, sender=None):
@@ -32,6 +32,9 @@ def handle_client(client):
             client.close()
             aliase = aliases[index]
             broadcast(f"{aliase} has left the chatroom".encode())
+
+            # Recording logout to JSON database
+            database.record_logout(aliase)
             aliases.remove(aliase)
             break
 
@@ -40,12 +43,6 @@ def receive():
     while True:
         print("Server is running and listening...")
         client,address = server.accept()
-
-        #Adding to the dictionary
-        dict[client] = address
-
-        for key, value in dict.items():
-            print(f"{key} : {value}")
             
         print(f"connection is established with {str(address)}")
         client.send("aliase?".encode())
@@ -54,6 +51,12 @@ def receive():
         clients.append(client)
         print(f"The aliase of this client is {aliase}".encode())
 
+        # Recording login to JSON database
+        ip_address = address[0]
+        port_num = address[1]
+        database.record_login(aliase, ip_address, port_num)
+        
+        
         broadcast(f"{aliase} has connected to the chatroom".encode())
         client.send("you are now connected".encode())
 
