@@ -1,8 +1,8 @@
 import socket
 import threading
 
-host = '127.0.0.1'
-port = 24680
+host = '0.0.0.0'
+port = 12345
 
 server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 server.bind((host,port))
@@ -13,9 +13,10 @@ clients = []
 aliases = []
 
 #Have to broadcast a message for the chat box or clients that are connected
-def broadcast(message):
+def broadcast(message, sender=None):
     for client in clients:
-        client.send(message)
+        if client != sender:
+            client.send(message)
 
 # Handling the movements of clients in the chatbox
 def handle_client(client):
@@ -23,7 +24,7 @@ def handle_client(client):
     while True:
         try:
             message = client.recv(1024)
-            broadcast(message)
+            broadcast(message, sender=client)
         except:
             index = clients.index(client)
             clients.remove(client)

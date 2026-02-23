@@ -4,7 +4,7 @@ import socket
 aliase = input("Enter aliase name: ")
 server_ip = input("Enter server IP address: ")
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect((server_ip, 24680))
+client.connect((server_ip, 12345))
 
 # handle receiving messages
 
