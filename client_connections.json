@@ -1,0 +1,18 @@
+{
+    "connections": [
+        {
+            "aliase": "Kamva",
+            "ip_address": "127.0.0.1",
+            "port": 57483,
+            "login_time": "2026-02-23 14:29:13",
+            "logout_time": "2026-02-23 14:31:30"
+        },
+        {
+            "aliase": "Poswa",
+            "ip_address": "127.0.0.1",
+            "port": 57506,
+            "login_time": "2026-02-23 14:29:30",
+            "logout_time": "2026-02-23 14:31:39"
+        }
+    ]
+}
