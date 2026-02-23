@@ -22,6 +22,7 @@ def client_receive():
             break
 
 # handle sending messages
+
 def client_send():
     while True:
         text = input("")
