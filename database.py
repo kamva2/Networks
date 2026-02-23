@@ -42,7 +42,7 @@ def record_logout(aliase):
     db = load_database()
     aliase_str = aliase.decode() if isinstance(aliase, bytes) else aliase
     
-    # Find the most recent connection record for this alias without logout time
+    # Find the most recent connection record for this aliase without logout time
     for record in reversed(db["connections"]):
         if record["aliase"] == aliase_str and record["logout_time"] is None:
             record["logout_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -56,7 +56,7 @@ def get_all_connections():
     db = load_database()
     return db["connections"]
 
-#Retrieve only active connections (no logout time)
+#Retrieve only active connections that are currently logged in.
 def get_active_connections():
     
     db = load_database()
