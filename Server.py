@@ -11,6 +11,7 @@ server.listen()
 #We keeping track of people who have connected to the server with their aliase and the port
 clients = []
 aliases = []
+dict = {}
 
 #Have to broadcast a message for the chat box or clients that are connected
 def broadcast(message, sender=None):
@@ -40,6 +41,12 @@ def receive():
         print("Server is running and listening...")
         client,address = server.accept()
 
+        #Adding to the dictionary
+        dict[client] = address
+
+        for key, value in dict.items():
+            print(f"{key} : {value}")
+            
         print(f"connection is established with {str(address)}")
         client.send("aliase?".encode())
         aliase = client.recv(1024)
