@@ -13,6 +13,13 @@
             "port": 57506,
             "login_time": "2026-02-23 14:29:30",
             "logout_time": "2026-02-23 14:31:39"
+        },
+        {
+            "aliase": "anele",
+            "ip_address": "127.0.0.1",
+            "port": 49679,
+            "login_time": "2026-03-03 09:32:11",
+            "logout_time": null
         }
     ]
 }
