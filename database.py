@@ -10,16 +10,61 @@ def load_database():
     if os.path.exists(DATABASE_FILE):
         try:
             with open(DATABASE_FILE, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+                if "users" not in data:
+                    data["users"] = []
+                if "connections" not in data:
+                    data["connections"] = []
+                return data
         except:
-            return {"connections": []}
-    return {"connections": []}
+            return {"users": [], "connections": []}
+    return {"users": [], "connections": []}
 
 #Save the client connection database to JSON file
 def save_database(data):
     
     with open(DATABASE_FILE, 'w') as f:
         json.dump(data, f, indent=4)
+
+
+def register_user(alias, password):
+    db = load_database()
+    alias_str = alias.decode() if isinstance(alias, bytes) else alias
+    password_str = password.decode() if isinstance(password, bytes) else password
+
+    for user in db["users"]:
+        if user["aliase"] == alias_str:
+            return False, "Alias already exists"
+
+    db["users"].append(
+        {
+            "aliase": alias_str,
+            "password": password_str,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+    )
+    save_database(db)
+    return True, "Registration successful"
+
+
+def authenticate_user(alias, password):
+    db = load_database()
+    alias_str = alias.decode() if isinstance(alias, bytes) else alias
+    password_str = password.decode() if isinstance(password, bytes) else password
+
+    for user in db["users"]:
+        if user["aliase"] == alias_str and user["password"] == password_str:
+            return True
+    return False
+
+
+def user_exists(alias):
+    db = load_database()
+    alias_str = alias.decode() if isinstance(alias, bytes) else alias
+    for user in db["users"]:
+        if user["aliase"] == alias_str:
+            return True
+    return False
 
 #Record a client login with timestamp
 def record_login(alias, ip_address, port):
