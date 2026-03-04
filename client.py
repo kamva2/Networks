@@ -11,7 +11,12 @@ def authenticate():
     global aliase
 
     while True:
-        message = client.recv(1024).decode()
+        try:
+            message = client.recv(1024).decode()
+        except:
+            print("An error occurred during authentication!")
+            client.close()
+            return
 
         if message.startswith("Authorise MODE?"):
             mode = input("Choose auth mode (REGISTER/LOGIN): ").strip().upper()
