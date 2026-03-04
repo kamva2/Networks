@@ -27,18 +27,23 @@ def save_database(data):
         json.dump(data, f, indent=4)
 
 
+def get_user_name(user):
+    return user.get("aliase") or user.get("username")
+
+
 def register_user(alias, password):
     db = load_database()
     alias_str = alias.decode() if isinstance(alias, bytes) else alias
     password_str = password.decode() if isinstance(password, bytes) else password
 
     for user in db["users"]:
-        if user["aliase"] == alias_str:
+        if get_user_name(user) == alias_str:
             return False, "Alias already exists"
 
     db["users"].append(
         {
             "aliase": alias_str,
+            "username": alias_str,
             "password": password_str,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
@@ -53,7 +58,7 @@ def authenticate_user(alias, password):
     password_str = password.decode() if isinstance(password, bytes) else password
 
     for user in db["users"]:
-        if user["aliase"] == alias_str and user["password"] == password_str:
+        if get_user_name(user) == alias_str and user.get("password") == password_str:
             return True
     return False
 
@@ -62,7 +67,7 @@ def user_exists(alias):
     db = load_database()
     alias_str = alias.decode() if isinstance(alias, bytes) else alias
     for user in db["users"]:
-        if user["aliase"] == alias_str:
+        if get_user_name(user) == alias_str:
             return True
     return False
 
