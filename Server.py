@@ -85,6 +85,12 @@ def handle_client(client, aliase):
             if not message:
                 remove_client(client)
                 break
+
+            text = message.decode(errors='ignore').strip().lower()
+            if text == 'exit' or text == f'{aliase}: exit'.lower():
+                remove_client(client)
+                break
+
             broadcast(message, sender=client)
         except:
             remove_client(client)

@@ -52,11 +52,16 @@ def client_receive():
 def client_send():
     while True:
         text = input("")
-        message = f'{aliase}: {text}'
         if text.lower() == 'exit':
-            client.send(message.encode())
+            client.send('exit'.encode())
+            try:
+                client.shutdown(socket.SHUT_RDWR)
+            except:
+                pass
             client.close()
             break
+
+        message = f'{aliase}: {text}'
         client.send(message.encode())
 
 
