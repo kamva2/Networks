@@ -21,5 +21,25 @@
             "login_time": "2026-03-03 09:32:11",
             "logout_time": null
         }
+    ],
+    "users": [
+        {
+            "username": "kpop",
+            "password": "12345",
+            "is_online": false,
+            "ip_address": "127.0.0.1",
+            "tcp_port": 51098,
+            "udp_port": 51448,
+            "last_login": "2026-03-03 23:49:03"
+        },
+        {
+            "username": "kv",
+            "password": "67890",
+            "is_online": true,
+            "ip_address": "127.0.0.1",
+            "tcp_port": 55427,
+            "udp_port": 51530,
+            "last_login": "2026-03-03 23:50:59"
+        }
     ]
 }
