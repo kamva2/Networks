@@ -93,7 +93,7 @@ def client_send():
             client.send('online clients'.encode())
             continue
 
-        if lowered.startswith('connect to '):
+        if text.startswith('connect to '):
             target = text[11:].strip()
             if not target:
                 print("Usage: connect to [client]")
