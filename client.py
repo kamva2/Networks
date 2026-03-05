@@ -5,6 +5,7 @@ server_ip = input("Enter server IP address: ")
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client.connect((server_ip, 12345))
 aliase = ""
+private_partner = None
 
 
 def authenticate():
@@ -31,7 +32,7 @@ def authenticate():
             print(message)
         elif message == "AUTH_SUCCESS":
             print("Authentication successful.")
-            print("Use: bdct txt {your message} to broadcast, online clients to list users, exit to leave.")
+            print("Use: bdct txt {your message}, online clients, connect to [client], accept connection, reject connection, exit")
             return
         else:
             print(message)
@@ -39,9 +40,33 @@ def authenticate():
 # handle receiving messages
 
 def client_receive():
+    global private_partner
+
     while True:
         try:
             message = client.recv(1024).decode()
+
+            if message.startswith("PRIVATE_REQUEST_FROM:"):
+                requester = message.split(":", 1)[1]
+                print(f"Private request from {requester}. Type: accept connection or reject connection")
+                continue
+
+            if message.startswith("PRIVATE_CONNECTED:"):
+                private_partner = message.split(":", 1)[1]
+                print(f"Private chat connected with {private_partner}. Use: private txt {{your message}}")
+                continue
+
+            if message.startswith("PRIVATE_REJECTED:"):
+                rejected_by = message.split(":", 1)[1]
+                print(f"Private request rejected by {rejected_by}")
+                continue
+
+            if message.startswith("PRIVATE_ENDED:"):
+                ended_by = message.split(":", 1)[1]
+                private_partner = None
+                print(f"Private chat ended because {ended_by} disconnected")
+                continue
+
             print(message)
         except:
             print("An error occurred!")
@@ -53,6 +78,8 @@ def client_receive():
 def client_send():
     while True:
         text = input("")
+        lowered = text.lower().strip()
+
         if text.lower() == 'exit':
             client.send('exit'.encode())
             try:
@@ -62,11 +89,27 @@ def client_send():
             client.close()
             break
 
-        if text.lower() == 'online clients':
+        if lowered == 'online clients':
             client.send('online clients'.encode())
             continue
 
-        if text.lower().startswith('bdct txt '):
+        if lowered.startswith('connect to '):
+            target = text[11:].strip()
+            if not target:
+                print("Usage: connect to [client]")
+                continue
+            client.send(f"connect to {target}".encode())
+            continue
+
+        if lowered == 'accept connection':
+            client.send('accept connection'.encode())
+            continue
+
+        if lowered == 'reject connection':
+            client.send('reject connection'.encode())
+            continue
+
+        if lowered.startswith('bdct txt '):
             actual_text = text[9:].strip()
             if not actual_text:
                 print("Broadcast message cannot be empty. Use: bdct txt {your message}")
@@ -74,8 +117,20 @@ def client_send():
 
             message = f'{aliase}: {actual_text}'
             client.send(message.encode())
+            continue
+
+        if lowered.startswith('private txt '):
+            actual_text = text[12:].strip()
+            if not actual_text:
+                print("Private message cannot be empty. Use: private txt {your message}")
+                continue
+            client.send(f"private txt {actual_text}".encode())
+            continue
+
+        if private_partner is not None:
+            client.send(f"private txt {text}".encode())
         else:
-            print("Invalid command. Use: bdct txt {your message}, online clients, or exit")
+            print("Invalid command. Use: bdct txt {your message}, online clients, connect to [client], accept connection, reject connection, private txt {your message}, or exit")
 
 
 authenticate()
