@@ -32,7 +32,7 @@ def authenticate():
             print(message)
         elif message == "AUTH_SUCCESS":
             print("Authentication successful, Welcome to Chat77!")
-            print("User Commands:\nTo broadcast text - bdct txt {your message}\nTo check for online users - online clients\nTo connect with a user - connect to [client]\nTo accept connection from a user - accept connection\nTo reject connection with a user - reject connection\nTo exit chat77 - exit")
+            print("User Commands:\nTo broadcast text - bdct txt {your message}\nTo check for online users - online clients\nTo connect with a user - connect to [client]\nTo accept connection from a user - accept connection\nTo reject connection with a user - reject connection\nTo exit chat77 ;( - exit")
             return
         else:
             print(message)
@@ -69,7 +69,7 @@ def client_receive():
 
             print(message)
         except:
-            print("An error occurred!")
+            print("Connection closed")
             client.close()
             break
 
@@ -82,10 +82,10 @@ def client_send():
 
         if text.lower() == 'exit':
             client.send('exit'.encode())
-            #try:
-                #client.shutdown(socket.SHUT_RDWR)
-            #except:
-            #    pass
+            try:
+                client.shutdown(socket.SHUT_RDWR)
+            except:
+                pass
             client.close()
             break
 
