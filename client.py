@@ -82,10 +82,10 @@ def client_send():
 
         if text.lower() == 'exit':
             client.send('exit'.encode())
-            try:
-                client.shutdown(socket.SHUT_RDWR)
-            except:
-                pass
+            #try:
+                #client.shutdown(socket.SHUT_RDWR)
+            #except:
+            #    pass
             client.close()
             break
 
