@@ -136,7 +136,7 @@ def handle_reject_request(aliase):
     send_to_alias(requester, f"PRIVATE_REJECTED:{aliase}")
     return f"INFO: Rejected private request from {requester}"
 
-
+# This is the function that authenticates the client when they first connect to the server
 def authenticate_client(client):
     while True:
         client.send("Authorise MODE? (REGISTER/LOGIN)".encode())
