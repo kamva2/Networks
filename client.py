@@ -31,8 +31,8 @@ def authenticate():
         elif message.startswith("ERROR:") or message.startswith("INFO:"):
             print(message)
         elif message == "AUTH_SUCCESS":
-            print("Authentication successful.")
-            print("Use: bdct txt {your message}, online clients, connect to [client], accept connection, reject connection, exit")
+            print("Authentication successful, Welcome to Chat77!")
+            print("User Commands:\nTo broadcast text - bdct txt {your message}\nTo check for online users - online clients\nTo connect with a user - connect to [client]\nTo accept connection from a user - accept connection\nTo reject connection with a user - reject connection\nTo exit chat77 - exit")
             return
         else:
             print(message)

@@ -61,20 +61,48 @@
             "ip_address": "172.16.49.232",
             "port": 59114,
             "login_time": "2026-03-05 15:18:55",
-            "logout_time": null
+            "logout_time": "2026-03-05 15:50:28"
         },
         {
             "aliase": "Thobelani",
             "ip_address": "172.16.0.1",
             "port": 56900,
             "login_time": "2026-03-05 15:21:11",
-            "logout_time": null
+            "logout_time": "2026-03-05 15:34:45"
         },
         {
             "aliase": "Anele",
             "ip_address": "172.16.48.71",
             "port": 59819,
             "login_time": "2026-03-05 15:23:13",
+            "logout_time": "2026-03-05 15:38:03"
+        },
+        {
+            "aliase": "Thobelani",
+            "ip_address": "172.16.0.1",
+            "port": 65088,
+            "login_time": "2026-03-05 15:35:18",
+            "logout_time": "2026-03-05 15:51:05"
+        },
+        {
+            "aliase": "Anele",
+            "ip_address": "172.16.48.71",
+            "port": 62509,
+            "login_time": "2026-03-05 15:38:35",
+            "logout_time": null
+        },
+        {
+            "aliase": "Anels",
+            "ip_address": "172.16.48.71",
+            "port": 50882,
+            "login_time": "2026-03-05 19:38:53",
+            "logout_time": "2026-03-05 19:41:06"
+        },
+        {
+            "aliase": "Zols",
+            "ip_address": "172.16.48.71",
+            "port": 61098,
+            "login_time": "2026-03-05 19:39:51",
             "logout_time": null
         }
     ],
@@ -120,6 +148,18 @@
             "username": "Anele",
             "password": "Zoleka",
             "created_at": "2026-03-05 15:22:59"
+        },
+        {
+            "aliase": "Anels",
+            "username": "Anels",
+            "password": "Anels2",
+            "created_at": "2026-03-05 19:38:33"
+        },
+        {
+            "aliase": "Zols",
+            "username": "Zols",
+            "password": "Zols2",
+            "created_at": "2026-03-05 19:39:41"
         }
     ]
 }
