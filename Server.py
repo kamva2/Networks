@@ -91,6 +91,11 @@ def handle_client(client, aliase):
                 remove_client(client)
                 break
 
+            if text == 'online clients':
+                online_list = ', '.join(aliases) if aliases else 'No clients online.'
+                client.send(f"Online clients: {online_list}".encode())
+                continue
+
             broadcast(message, sender=client)
         except:
             remove_client(client)

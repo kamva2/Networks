@@ -31,7 +31,7 @@ def authenticate():
             print(message)
         elif message == "AUTH_SUCCESS":
             print("Authentication successful.")
-            print("Use: bdct txt {your message} to broadcast. Type exit to leave.")
+            print("Use: bdct txt {your message} to broadcast, online clients to list users, exit to leave.")
             return
         else:
             print(message)
@@ -62,6 +62,10 @@ def client_send():
             client.close()
             break
 
+        if text.lower() == 'online clients':
+            client.send('online clients'.encode())
+            continue
+
         if text.lower().startswith('bdct txt '):
             actual_text = text[9:].strip()
             if not actual_text:
@@ -71,7 +75,7 @@ def client_send():
             message = f'{aliase}: {actual_text}'
             client.send(message.encode())
         else:
-            print("Invalid command. Use: bdct txt {your message} or exit")
+            print("Invalid command. Use: bdct txt {your message}, online clients, or exit")
 
 
 authenticate()
