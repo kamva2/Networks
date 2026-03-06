@@ -12,6 +12,7 @@ server.listen()
 #We keeping track of people who have connected to the server with their aliase and the port
 clients = []
 aliases = []
+# We will also keep track of pending private chat requests and active private chat connections
 pending_requests = {}
 private_partners = {}
 
@@ -21,14 +22,14 @@ def broadcast(message, sender=None):
         if client != sender:
             client.send(message)
 
-
+# This is the function that retrieves the client socket object based on their aliase
 def get_client_by_alias(aliase):
     if aliase not in aliases:
         return None
     index = aliases.index(aliase)
     return clients[index]
 
-
+# This is the function that sends a message to a specific client based on their aliase
 def send_to_alias(aliase, message):
     target_client = get_client_by_alias(aliase)
     if target_client is None:
@@ -39,7 +40,7 @@ def send_to_alias(aliase, message):
     except:
         return False
 
-
+# This is the function that ends a private chat connection between two clients
 def end_private_connection(aliase):
     if aliase not in private_partners:
         return
@@ -49,7 +50,7 @@ def end_private_connection(aliase):
         private_partners.pop(partner)
         send_to_alias(partner, f"PRIVATE_ENDED:{aliase}")
 
-
+# This is the function that cleans up any pending private chat requests when a client disconnects or exits the chatroom
 def cleanup_pending_requests(aliase):
     if aliase in pending_requests:
         requester = pending_requests.pop(aliase)
@@ -63,7 +64,7 @@ def cleanup_pending_requests(aliase):
     for target in targets_to_remove:
         pending_requests.pop(target, None)
 
-
+# This is the function that removes the client from the server when they disconnect or exit the chatroom
 def remove_client(client):
     if client not in clients:
         return
@@ -84,7 +85,7 @@ def remove_client(client):
     broadcast(f"{aliase} has left the chatroom".encode())
     database.record_logout(aliase)
 
-
+# This is the function that handles the client's request to connect to another client for a private chat
 def handle_connect_request(aliase, text):
     requested_alias = text[len('connect to '):].strip()
 
@@ -110,7 +111,7 @@ def handle_connect_request(aliase, text):
     send_to_alias(requested_alias, f"PRIVATE_REQUEST_FROM:{aliase}")
     return f"INFO: Connection request sent to {requested_alias}"
 
-
+# This is the function that handles the client's request to accept a private chat request
 def handle_accept_request(aliase):
     if aliase not in pending_requests:
         return "INFO: You have no pending private request"
@@ -127,7 +128,7 @@ def handle_accept_request(aliase):
     send_to_alias(requester, f"PRIVATE_CONNECTED:{aliase}")
     return f"PRIVATE_CONNECTED:{requester}"
 
-
+# This is the function that handles the client's request to reject a private chat request
 def handle_reject_request(aliase):
     if aliase not in pending_requests:
         return "INFO: You have no pending private request"
