@@ -7,7 +7,7 @@ client.connect((server_ip, 12345))
 aliase = ""
 private_partner = None
 
-
+# This is the function that handles the authentication process with the server, including registering or logging in, and setting the aliase for the client
 def authenticate():
     global aliase
 
@@ -32,13 +32,12 @@ def authenticate():
             print(message)
         elif message == "AUTH_SUCCESS":
             print("Authentication successful, Welcome to Chat77!")
-            print("User Commands:\nTo broadcast text - bdct txt {your message}\nTo check for online users - online clients\nTo connect with a user - connect to [client]\nTo accept connection from a user - accept connection\nTo reject connection with a user - reject connection\nTo exit chat77 ;( - exit")
+            print("User Commands:\nTo broadcast text - bdct txt {your message}\nTo check for online users - online clients\nTo connect with a user - connect to [client]\nTo accept connection from a user - accept connection\nTo reject connection with a user - reject connection\nTo exit chat77 :(- exit")
             return
         else:
             print(message)
 
-# handle receiving messages
-
+# This is the function that handles receiving messages from the server and printing them to the console, including handling private chat requests and connections
 def client_receive():
     global private_partner
 
@@ -73,8 +72,7 @@ def client_receive():
             client.close()
             break
 
-# handle sending messages
-
+# This is the function that handles sending messages to the server based on user input, including broadcasting messages, sending private messages, and handling connection requests
 def client_send():
     while True:
         text = input("")
@@ -135,6 +133,7 @@ def client_send():
 
 authenticate()
 
+# Start the receive and send threads after authentication is successful
 receive_thread = threading.Thread(target=client_receive)
 receive_thread.start()
 
