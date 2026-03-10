@@ -40,25 +40,59 @@ def send_to_alias(aliase, message):
     except:
         return False
 
+# This function resolves alias case-insensitively to the canonical online alias
+def resolve_alias(raw_alias):
+    for online_alias in aliases:
+        if online_alias.lower() == raw_alias.lower():
+            return online_alias
+    return None
+
+# This function ensures an alias has a private partner set initialized
+def ensure_private_partner_set(aliase):
+    if aliase not in private_partners:
+        private_partners[aliase] = set()
+
+# This function creates a two-way private connection between users
+def add_private_connection(aliase_a, aliase_b):
+    ensure_private_partner_set(aliase_a)
+    ensure_private_partner_set(aliase_b)
+    private_partners[aliase_a].add(aliase_b)
+    private_partners[aliase_b].add(aliase_a)
+
+# This function removes a two-way private connection and notifies both users
+def remove_private_connection(aliase_a, aliase_b, reason):
+    if aliase_a in private_partners:
+        private_partners[aliase_a].discard(aliase_b)
+        if not private_partners[aliase_a]:
+            private_partners.pop(aliase_a, None)
+
+    if aliase_b in private_partners:
+        private_partners[aliase_b].discard(aliase_a)
+        if not private_partners[aliase_b]:
+            private_partners.pop(aliase_b, None)
+
+    send_to_alias(aliase_a, f"PRIVATE_ENDED:{aliase_b}:{reason}")
+    send_to_alias(aliase_b, f"PRIVATE_ENDED:{aliase_a}:{reason}")
+
 # This is the function that ends a private chat connection between two clients
 def end_private_connection(aliase):
-    if aliase not in private_partners:
-        return
-
-    partner = private_partners.pop(aliase)
-    if partner in private_partners and private_partners[partner] == aliase:
-        private_partners.pop(partner)
-        send_to_alias(partner, f"PRIVATE_ENDED:{aliase}")
+    partners = list(private_partners.get(aliase, set()))
+    for partner in partners:
+        remove_private_connection(aliase, partner, "disconnected")
 
 # This is the function that cleans up any pending private chat requests when a client disconnects or exits the chatroom
 def cleanup_pending_requests(aliase):
+    # Notify everyone who requested this user.
     if aliase in pending_requests:
-        requester = pending_requests.pop(aliase)
-        send_to_alias(requester, f"INFO: {aliase} is no longer available for private chat")
+        requesters = list(pending_requests.pop(aliase))
+        for requester in requesters:
+            send_to_alias(requester, f"INFO: {aliase} is no longer available for private chat")
 
+    # Remove requests sent by this user to others.
     targets_to_remove = []
-    for target, requester in pending_requests.items():
-        if requester == aliase:
+    for target, requesters in pending_requests.items():
+        requesters.discard(aliase)
+        if not requesters:
             targets_to_remove.append(target)
 
     for target in targets_to_remove:
@@ -90,52 +124,109 @@ def handle_connect_request(aliase, text):
     requested_alias = text[len('connect to '):].strip()
 
     if not requested_alias:
-        return "INFO: Usage -> connect to [client]"
+        return "INFO: connect to [client]"
+
+    requested_alias = resolve_alias(requested_alias)
+    if requested_alias is None:
+        return "INFO: Target alias is not online"
 
     if requested_alias == aliase:
         return "INFO: You cannot connect to yourself"
 
-    if requested_alias not in aliases:
-        return f"INFO: {requested_alias} is not online"
+    if requested_alias in private_partners.get(aliase, set()):
+        return f"INFO: You already have a private connection with {requested_alias}"
 
-    if aliase in private_partners:
-        return "INFO: You are already in a private chat"
+    if requested_alias not in pending_requests:
+        pending_requests[requested_alias] = set()
 
-    if requested_alias in private_partners:
-        return f"INFO: {requested_alias} is already in a private chat"
+    if aliase in pending_requests[requested_alias]:
+        return f"INFO: You already sent a request to {requested_alias}"
 
-    if requested_alias in pending_requests:
-        return f"INFO: {requested_alias} already has a pending request"
-
-    pending_requests[requested_alias] = aliase
+    pending_requests[requested_alias].add(aliase)
     send_to_alias(requested_alias, f"PRIVATE_REQUEST_FROM:{aliase}")
     return f"INFO: Connection request sent to {requested_alias}"
 
 # This is the function that handles the client's request to accept a private chat request
-def handle_accept_request(aliase):
-    if aliase not in pending_requests:
-        return "INFO: You have no pending private request"
+def handle_accept_request(aliase, text):
+    requester_raw = text[len('accept connection '):].strip()
+    if not requester_raw:
+        return "INFO: accept connection [client]"
 
-    requester = pending_requests.pop(aliase)
-    if requester not in aliases:
+    requester = resolve_alias(requester_raw)
+    if requester is None:
         return "INFO: Requester is no longer online"
 
-    if aliase in private_partners or requester in private_partners:
-        return "INFO: Either you or requester is already in a private chat"
+    if aliase not in pending_requests or requester not in pending_requests[aliase]:
+        return f"INFO: No pending request from {requester_raw}"
 
-    private_partners[aliase] = requester
-    private_partners[requester] = aliase
+    pending_requests[aliase].discard(requester)
+    if not pending_requests[aliase]:
+        pending_requests.pop(aliase, None)
+
+    add_private_connection(aliase, requester)
     send_to_alias(requester, f"PRIVATE_CONNECTED:{aliase}")
     return f"PRIVATE_CONNECTED:{requester}"
 
 # This is the function that handles the client's request to reject a private chat request
-def handle_reject_request(aliase):
-    if aliase not in pending_requests:
-        return "INFO: You have no pending private request"
+def handle_reject_request(aliase, text):
+    requester_raw = text[len('reject connection '):].strip()
+    if not requester_raw:
+        return "INFO: reject connection [client]"
 
-    requester = pending_requests.pop(aliase)
+    requester = resolve_alias(requester_raw)
+    if requester is None:
+        return "INFO: Requester is no longer online"
+
+    if aliase not in pending_requests or requester not in pending_requests[aliase]:
+        return f"INFO: No pending request from {requester_raw}"
+
+    pending_requests[aliase].discard(requester)
+    if not pending_requests[aliase]:
+        pending_requests.pop(aliase, None)
+
     send_to_alias(requester, f"PRIVATE_REJECTED:{aliase}")
     return f"INFO: Rejected private request from {requester}"
+
+# This is the function that handles ending one private connection by alias
+def handle_end_private_request(aliase, text):
+    target_raw = text[len('end private '):].strip()
+    if not target_raw:
+        return "INFO: end private [client]"
+
+    target = resolve_alias(target_raw)
+    if target is None:
+        return "INFO: Target alias is not online"
+
+    if target not in private_partners.get(aliase, set()):
+        return f"INFO: You do not have a private connection with {target_raw}"
+
+    remove_private_connection(aliase, target, "ended by command")
+    return f"INFO: Private connection with {target} ended"
+
+# This is the function that sends one private message to a selected connected partner
+def handle_private_message(aliase, raw_text):
+    payload = raw_text[12:].strip()
+    if not payload:
+        return "INFO: private txt [client] [message]"
+
+    parts = payload.split(maxsplit=1)
+    if len(parts) < 2:
+        return "INFO: private txt [client] [message]"
+
+    target_raw, private_text = parts[0], parts[1].strip()
+    if not private_text:
+        return "INFO: Private message cannot be empty"
+
+    target = resolve_alias(target_raw)
+    if target is None:
+        return "INFO: Target alias is not online"
+
+    if target not in private_partners.get(aliase, set()):
+        return f"INFO: No private connection with {target_raw}"
+
+    send_to_alias(target, f"[Private:{target}] {aliase}: {private_text}")
+    return ""
+
 
 # This is the function that authenticates the client when they first connect to the server
 def authenticate_client(client):
@@ -186,7 +277,8 @@ def handle_client(client, aliase):
                 remove_client(client)
                 break
 
-            text = message.decode(errors='ignore').strip().lower()
+            raw_text = message.decode(errors='ignore').strip()
+            text = raw_text.lower()
             if text == 'exit' or text == f'{aliase}: exit'.lower():
                 remove_client(client)
                 break
@@ -197,31 +289,37 @@ def handle_client(client, aliase):
                 continue
 
             if text.startswith('connect to '):
-                response = handle_connect_request(aliase, text)
+                response = handle_connect_request(aliase, raw_text)
                 client.send(response.encode())
                 continue
 
-            if text == 'accept connection':
-                response = handle_accept_request(aliase)
+            if text.startswith('accept connection '):
+                response = handle_accept_request(aliase, raw_text)
                 client.send(response.encode())
                 continue
 
-            if text == 'reject connection':
-                response = handle_reject_request(aliase)
+            if text.startswith('reject connection '):
+                response = handle_reject_request(aliase, raw_text)
                 client.send(response.encode())
+                continue
+
+            if text.startswith('end private '):
+                response = handle_end_private_request(aliase, raw_text)
+                client.send(response.encode())
+                continue
+
+            if text == 'my private chats':
+                partners = sorted(private_partners.get(aliase, set()))
+                if partners:
+                    client.send(f"Private chats: {', '.join(partners)}".encode())
+                else:
+                    client.send("Private chats: none".encode())
                 continue
 
             if text.startswith('private txt '):
-                private_text = message.decode(errors='ignore')[12:].strip()
-                if aliase not in private_partners:
-                    client.send("INFO: You are not in a private chat".encode())
-                    continue
-                if not private_text:
-                    client.send("INFO: Private message cannot be empty".encode())
-                    continue
-
-                partner = private_partners[aliase]
-                send_to_alias(partner, f"[Private] {aliase}: {private_text}")
+                response = handle_private_message(aliase, raw_text)
+                if response:
+                    client.send(response.encode())
                 continue
 
             broadcast(message, sender=client)
