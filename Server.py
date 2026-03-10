@@ -144,7 +144,7 @@ def authenticate_client(client):
         mode = client.recv(1024).decode().strip().upper()
 
         if mode not in ("REGISTER", "LOGIN"):
-            client.send("ERROR: Invalid auth mode".encode())
+            client.send("ERROR: Invalid authentication mode".encode())
             continue
 
         client.send("ALIAS?".encode())
@@ -173,7 +173,7 @@ def authenticate_client(client):
             client.send("This alias is already logged in".encode())
             continue
 
-        client.send("AUTH_SUCCESS".encode())
+        client.send("SUCCESSFULLY AUTHENTICATE".encode())
         return aliase
 
 # Handling the movements of clients in the chatbox
