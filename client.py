@@ -6,7 +6,7 @@ import uuid
 
 server_ip = input("Enter server IP address: ")
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect((server_ip, 12345))
+client.connect((server_ip, 22081))
 aliase = ""
 private_partners = set()
 pending_requesters = set()
