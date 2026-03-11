@@ -15,6 +15,8 @@ aliases = []
 # We will also keep track of pending private chat requests and active private chat connections
 pending_requests = {}
 private_partners = {}
+client_udp_ports = {}
+client_ips = {}
 
 #Have to broadcast a message for the chat box or clients that are connected
 def broadcast(message, sender=None):
@@ -98,6 +100,11 @@ def cleanup_pending_requests(aliase):
     for target in targets_to_remove:
         pending_requests.pop(target, None)
 
+# This is the function that cleans up any UDP state when a client disconnects or exits the chatroom
+def cleanup_udp_state(aliase):
+    client_udp_ports.pop(aliase, None)
+    client_ips.pop(aliase, None)
+
 # This is the function that removes the client from the server when they disconnect or exit the chatroom
 def remove_client(client):
     if client not in clients:
@@ -115,9 +122,39 @@ def remove_client(client):
 
     cleanup_pending_requests(aliase)
     end_private_connection(aliase)
+    cleanup_udp_state(aliase)
 
     broadcast(f"{aliase} has left the chatroom".encode())
     database.record_logout(aliase)
+
+# This is the function that handles the client's request to connect to another client for a private UDP file transfer
+def handle_udp_connect_request(aliase, text):
+    target_raw = text[len('udp connect '):].strip()
+    if not target_raw:
+        return "INFO: udp connect [client]"
+
+    target = resolve_alias(target_raw)
+    if target is None:
+        return "INFO: Target alias is not online"
+
+    if target not in private_partners.get(aliase, set()):
+        return f"INFO: No private connection with {target_raw}"
+
+    sender_port = client_udp_ports.get(aliase)
+    target_port = client_udp_ports.get(target)
+    sender_ip = client_ips.get(aliase)
+    target_ip = client_ips.get(target)
+
+    if not sender_port:
+        return "INFO: Your UDP endpoint is not registered"
+
+    if not target_port or not target_ip:
+        return f"INFO: {target} UDP endpoint is not registered"
+
+    # Share peer endpoint with both clients so either side can send files.
+    send_to_alias(aliase, f"UDP_PEER:{target}:{target_ip}:{target_port}")
+    send_to_alias(target, f"UDP_PEER:{aliase}:{sender_ip}:{sender_port}")
+    return f"INFO: UDP peer linked with {target}"
 
 # This is the function that handles the client's request to connect to another client for a private chat
 def handle_connect_request(aliase, text):
@@ -268,7 +305,9 @@ def authenticate_client(client):
         return aliase
 
 # Handling the movements of clients in the chatbox
-def handle_client(client, aliase):
+def handle_client(client, aliase, address):
+
+    client_ips[aliase] = address[0]
 
     while True:
         try:
@@ -290,6 +329,22 @@ def handle_client(client, aliase):
 
             if text.startswith('connect to '):
                 response = handle_connect_request(aliase, raw_text)
+                client.send(response.encode())
+                continue
+
+            if raw_text.startswith('UDP_PORT:'):
+                try:
+                    udp_port = int(raw_text.split(':', 1)[1].strip())
+                    if udp_port <= 0 or udp_port > 65535:
+                        raise ValueError
+                    client_udp_ports[aliase] = udp_port
+                    client.send(f"INFO: UDP port {udp_port} registered".encode())
+                except:
+                    client.send("INFO: Invalid UDP port registration".encode())
+                continue
+
+            if text.startswith('udp connect '):
+                response = handle_udp_connect_request(aliase, raw_text)
                 client.send(response.encode())
                 continue
 
@@ -349,6 +404,6 @@ def receive():
         client.send("you are now connected".encode())
 
         #Then for this program to support multiple clients we have to introduce multi-threading
-        thread = threading.Thread(target=handle_client, args=(client, aliase))
+        thread = threading.Thread(target=handle_client, args=(client, aliase, address))
         thread.start()
 receive()
