@@ -264,7 +264,7 @@ def authenticate_client(client):
             client.send("This alias is already logged in".encode())
             continue
 
-        client.send("SUCCESSFULLY AUTHENTICATE".encode())
+        client.send("AUTH_SUCCESS".encode())
         return aliase
 
 # Handling the movements of clients in the chatbox

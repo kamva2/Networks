@@ -18,7 +18,7 @@ def authenticate():
         except:
             print("An error occurred during authentication!")
             client.close()
-            return
+            return False
 
         if message.startswith("Authorise MODE?"):
             mode = input("Choose auth mode (REGISTER/LOGIN): ").strip().upper()
@@ -31,7 +31,7 @@ def authenticate():
             client.send(password.encode())
         elif message.startswith("ERROR:") or message.startswith("INFO:"):
             print(message)
-        elif message == "AUTH_SUCCESS":
+        elif message in ("AUTH_SUCCESS", "SUCCESSFULLY AUTHENTICATE"):
             print("Authentication successful, Welcome to Chat77!")
             print(
                 "User Commands:\n"
@@ -45,7 +45,7 @@ def authenticate():
                 "To end one private chat - end private [client]\n"
                 "To exit chat77 :(- exit"
             )
-            return
+            return True
         else:
             print(message)
 
@@ -176,12 +176,10 @@ def client_send():
 
         print("Invalid command. Use: bdct txt {your message}, online clients, connect to [client], accept connection [client], reject connection [client], my private chats, private txt [client] {your message}, end private [client], or exit")
 
+if authenticate():
+    # Start the receive and send threads after authentication is successful
+    receive_thread = threading.Thread(target=client_receive)
+    receive_thread.start()
 
-authenticate()
-
-# Start the receive and send threads after authentication is successful
-receive_thread = threading.Thread(target=client_receive)
-receive_thread.start()
-
-send_thread = threading.Thread(target=client_send)
-send_thread.start()
+    send_thread = threading.Thread(target=client_send)
+    send_thread.start()
