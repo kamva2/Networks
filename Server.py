@@ -206,7 +206,7 @@ def handle_create_group(aliase, text):
     group_owners[group_name] = aliase
     return f"GROUP_JOINED:{group_name}"
 
-
+# This is the function that handles inviting another client to join a group, which can only be done by the group owner
 def handle_invite_group(aliase, text):
     payload = text[len('invite group '):].strip()
     parts = payload.split(maxsplit=1)
@@ -243,7 +243,7 @@ def handle_invite_group(aliase, text):
 
     return f"INFO: {target} is offline. Group invite queued for delivery."
 
-
+# This is the function that handles accepting a group invite, which adds the client to the group and notifies all current group members of the new addition
 def handle_accept_group(aliase, text):
     group_raw = text[len('accept group '):].strip()
     if not group_raw:
@@ -266,7 +266,7 @@ def handle_accept_group(aliase, text):
             send_to_alias(member, f"INFO: {aliase} joined group {group_name}")
     return f"GROUP_JOINED:{group_name}"
 
-
+# This is the function that handles rejecting a group invite, which removes the pending invite and notifies the group owner of the rejection
 def handle_reject_group(aliase, text):
     group_raw = text[len('reject group '):].strip()
     if not group_raw:
@@ -288,7 +288,7 @@ def handle_reject_group(aliase, text):
         send_to_alias(owner, f"INFO: {aliase} rejected invite to group {group_name}")
     return f"INFO: Rejected invite to group {group_name}"
 
-
+# This is the function that handles listing all groups that the client is currently a member of
 def handle_my_groups(aliase):
     mine = sorted([group_name for group_name, members in groups.items() if aliase in members])
     if not mine:
@@ -321,7 +321,7 @@ def handle_group_message(aliase, raw_text):
             else:
                 queue_offline_message(member, message)
     return ""
-
+# This is the function that checks if a file transfer can be relayed from the sender to the target client based on their private chat connection status
 def can_relay_file(sender_alias, target_alias):
     if target_alias is None:
         return False, "INFO: Target alias is not online"
@@ -329,7 +329,7 @@ def can_relay_file(sender_alias, target_alias):
         return False, "INFO: No private connection with target"
     return True, ""
 
-
+# This is the function that handles the initial file transfer request from the sender, which includes the target client, filename, file size, and transfer ID. It checks if the transfer can be relayed and then forwards the file start information to the target client if allowed.
 def handle_file_start(sender_alias, raw_text):
     parts = raw_text.split("|", 4)
     if len(parts) != 5:
@@ -344,7 +344,7 @@ def handle_file_start(sender_alias, raw_text):
     send_to_alias(target_alias, f"FILE_START_FROM|{sender_alias}|{filename}|{size_str}|{transfer_id}")
     return ""
 
-
+# This is the function that handles relaying file chunks from the sender to the target client during a file transfer
 def handle_file_chunk(sender_alias, raw_text):
     parts = raw_text.split("|", 4)
     if len(parts) != 5:
@@ -359,7 +359,7 @@ def handle_file_chunk(sender_alias, raw_text):
     send_to_alias(target_alias, f"FILE_CHUNK_FROM|{sender_alias}|{transfer_id}|{seq_str}|{chunk_b64}")
     return ""
 
-
+# This is the function that handles the end of a file transfer, which notifies the target client that the transfer is complete and includes the total number of chunks received
 def handle_file_end(sender_alias, raw_text):
     parts = raw_text.split("|", 3)
     if len(parts) != 4:
