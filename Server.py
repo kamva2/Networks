@@ -15,8 +15,6 @@ aliases = []
 # We will also keep track of pending private chat requests and active private chat connections
 pending_requests = {}
 private_partners = {}
-client_udp_ports = {}
-client_ips = {}
 
 #Have to broadcast a message for the chat box or clients that are connected
 def broadcast(message, sender=None):
@@ -100,11 +98,6 @@ def cleanup_pending_requests(aliase):
     for target in targets_to_remove:
         pending_requests.pop(target, None)
 
-# This is the function that cleans up any UDP state when a client disconnects or exits the chatroom
-def cleanup_udp_state(aliase):
-    client_udp_ports.pop(aliase, None)
-    client_ips.pop(aliase, None)
-
 # This is the function that removes the client from the server when they disconnect or exit the chatroom
 def remove_client(client):
     if client not in clients:
@@ -122,39 +115,61 @@ def remove_client(client):
 
     cleanup_pending_requests(aliase)
     end_private_connection(aliase)
-    cleanup_udp_state(aliase)
 
     broadcast(f"{aliase} has left the chatroom".encode())
     database.record_logout(aliase)
 
-# This is the function that handles the client's request to connect to another client for a private UDP file transfer
-def handle_udp_connect_request(aliase, text):
-    target_raw = text[len('udp connect '):].strip()
-    if not target_raw:
-        return "INFO: udp connect [client]"
+def can_relay_file(sender_alias, target_alias):
+    if target_alias is None:
+        return False, "INFO: Target alias is not online"
+    if target_alias not in private_partners.get(sender_alias, set()):
+        return False, "INFO: No private connection with target"
+    return True, ""
 
-    target = resolve_alias(target_raw)
-    if target is None:
-        return "INFO: Target alias is not online"
 
-    if target not in private_partners.get(aliase, set()):
-        return f"INFO: No private connection with {target_raw}"
+def handle_file_start(sender_alias, raw_text):
+    parts = raw_text.split("|", 4)
+    if len(parts) != 5:
+        return "INFO: Invalid file start packet"
 
-    sender_port = client_udp_ports.get(aliase)
-    target_port = client_udp_ports.get(target)
-    sender_ip = client_ips.get(aliase)
-    target_ip = client_ips.get(target)
+    _, target_raw, filename, size_str, transfer_id = parts
+    target_alias = resolve_alias(target_raw)
+    allowed, msg = can_relay_file(sender_alias, target_alias)
+    if not allowed:
+        return msg
 
-    if not sender_port:
-        return "INFO: Your UDP endpoint is not registered"
+    send_to_alias(target_alias, f"FILE_START_FROM|{sender_alias}|{filename}|{size_str}|{transfer_id}")
+    return ""
 
-    if not target_port or not target_ip:
-        return f"INFO: {target} UDP endpoint is not registered"
 
-    # Share peer endpoint with both clients so either side can send files.
-    send_to_alias(aliase, f"UDP_PEER:{target}:{target_ip}:{target_port}")
-    send_to_alias(target, f"UDP_PEER:{aliase}:{sender_ip}:{sender_port}")
-    return f"INFO: UDP peer linked with {target}"
+def handle_file_chunk(sender_alias, raw_text):
+    parts = raw_text.split("|", 4)
+    if len(parts) != 5:
+        return ""
+
+    _, target_raw, transfer_id, seq_str, chunk_b64 = parts
+    target_alias = resolve_alias(target_raw)
+    allowed, _ = can_relay_file(sender_alias, target_alias)
+    if not allowed:
+        return ""
+
+    send_to_alias(target_alias, f"FILE_CHUNK_FROM|{sender_alias}|{transfer_id}|{seq_str}|{chunk_b64}")
+    return ""
+
+
+def handle_file_end(sender_alias, raw_text):
+    parts = raw_text.split("|", 3)
+    if len(parts) != 4:
+        return ""
+
+    _, target_raw, transfer_id, total_chunks = parts
+    target_alias = resolve_alias(target_raw)
+    allowed, _ = can_relay_file(sender_alias, target_alias)
+    if not allowed:
+        return ""
+
+    send_to_alias(target_alias, f"FILE_END_FROM|{sender_alias}|{transfer_id}|{total_chunks}")
+    return ""
 
 # This is the function that handles the client's request to connect to another client for a private chat
 def handle_connect_request(aliase, text):
@@ -306,9 +321,6 @@ def authenticate_client(client):
 
 # Handling the movements of clients in the chatbox
 def handle_client(client, aliase, address):
-
-    client_ips[aliase] = address[0]
-
     while True:
         try:
             message = client.recv(1024)
@@ -318,6 +330,21 @@ def handle_client(client, aliase, address):
 
             raw_text = message.decode(errors='ignore').strip()
             text = raw_text.lower()
+
+            if raw_text.startswith("FILE_START|"):
+                response = handle_file_start(aliase, raw_text)
+                if response:
+                    client.send(response.encode())
+                continue
+
+            if raw_text.startswith("FILE_CHUNK|"):
+                handle_file_chunk(aliase, raw_text)
+                continue
+
+            if raw_text.startswith("FILE_END|"):
+                handle_file_end(aliase, raw_text)
+                continue
+
             if text == 'exit' or text == f'{aliase}: exit'.lower():
                 remove_client(client)
                 break
@@ -329,22 +356,6 @@ def handle_client(client, aliase, address):
 
             if text.startswith('connect to '):
                 response = handle_connect_request(aliase, raw_text)
-                client.send(response.encode())
-                continue
-
-            if raw_text.startswith('UDP_PORT:'):
-                try:
-                    udp_port = int(raw_text.split(':', 1)[1].strip())
-                    if udp_port <= 0 or udp_port > 65535:
-                        raise ValueError
-                    client_udp_ports[aliase] = udp_port
-                    client.send(f"INFO: UDP port {udp_port} registered".encode())
-                except:
-                    client.send("INFO: Invalid UDP port registration".encode())
-                continue
-
-            if text.startswith('udp connect '):
-                response = handle_udp_connect_request(aliase, raw_text)
                 client.send(response.encode())
                 continue
 
