@@ -2,7 +2,7 @@ import socket
 import threading
 import database
 
-host = '127.0.0.1'
+host = '0.0.0.0'
 port = 22081
 
 server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
@@ -365,6 +365,7 @@ def handle_file_start(sender_alias, raw_text):
         return msg
 
     send_to_alias(target_alias, f"FILE_START_FROM|{sender_alias}|{filename}|{size_str}|{transfer_id}")
+    send_beep(target_alias, sender_alias, "FILE")
     return ""
 
 # This is the function that handles relaying file chunks from the sender to the target client during a file transfer
@@ -504,6 +505,7 @@ def handle_private_message(aliase, raw_text):
         if target not in private_partners.get(aliase, set()):
             return f"INFO: No private connection with {target_raw}"
         send_to_alias(target, f"[Private:{target}] {aliase}: {private_text}")
+        send_beep(target, aliase, "PRIVATE")
         return ""
 
     offline_target = resolve_registered_alias(target_raw)
