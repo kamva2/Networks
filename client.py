@@ -10,6 +10,8 @@ client.connect((server_ip, 22081))
 aliase = ""
 private_partners = set()
 pending_requesters = set()
+groups = set()
+pending_group_invites = set()
 incoming_transfers = {}
 
 # Keep only basename to prevent writing outside project folders.
@@ -108,6 +110,12 @@ def authenticate():
                 "To reject connection - reject connection [client]\n"
                 "To list private chats - my private chats\n"
                 "To send private text - private txt [client] {your message}\n"
+                "To create group - create group [group_name]\n"
+                "To invite to group - invite group [group_name] [client]\n"
+                "To accept group invite - accept group [group_name]\n"
+                "To reject group invite - reject group [group_name]\n"
+                "To list your groups - my groups\n"
+                "To send group text - group txt [group_name] {your message}\n"
                 "To send file over TCP - send file [client] [file_path]\n"
                 "To end one private chat - end private [client]\n"
                 "To exit chat77 :(- exit"
@@ -118,7 +126,7 @@ def authenticate():
 
 # This is the function that handles receiving messages from the server and printing them to the console, including handling private chat requests and connections
 def client_receive():
-    global private_partners, pending_requesters
+    global private_partners, pending_requesters, groups, pending_group_invites
 
     while True:
         try:
@@ -149,6 +157,22 @@ def client_receive():
                 reason = parts[2] if len(parts) > 2 else "ended"
                 private_partners.discard(ended_by)
                 print(f"Private chat with {ended_by} ended ({reason})")
+                continue
+
+            if message.startswith("GROUP_INVITE:"):
+                parts = message.split(":", 2)
+                if len(parts) == 3:
+                    group_name = parts[1]
+                    invited_by = parts[2]
+                    pending_group_invites.add(group_name)
+                    print(f"Group invite to '{group_name}' from {invited_by}. Type: accept group {group_name} or reject group {group_name}")
+                continue
+
+            if message.startswith("GROUP_JOINED:"):
+                group_name = message.split(":", 1)[1]
+                groups.add(group_name)
+                pending_group_invites.discard(group_name)
+                print(f"You joined group: {group_name}")
                 continue
 
             if message.startswith("FILE_START_FROM|"):
@@ -200,7 +224,7 @@ def client_receive():
 
 # This is the function that handles sending messages to the server based on user input, including broadcasting messages, sending private messages, and handling connection requests
 def client_send():
-    global private_partners
+    global private_partners, groups
     while True:
         text = input("")
         lowered = text.lower().strip()
@@ -216,6 +240,61 @@ def client_send():
 
         if lowered == 'online clients':
             client.send('online clients'.encode())
+            continue
+
+        if lowered.startswith('create group '):
+            group_name = text[len('create group '):].strip()
+            if not group_name:
+                print("Usage: create group [group_name]")
+                continue
+            client.send(f'create group {group_name}'.encode())
+            continue
+
+        if lowered.startswith('invite group '):
+            payload = text[len('invite group '):].strip()
+            parts = payload.split(' ', 1)
+            if len(parts) < 2:
+                print("Usage: invite group [group_name] [client]")
+                continue
+            group_name, target = parts[0].strip(), parts[1].strip()
+            client.send(f'invite group {group_name} {target}'.encode())
+            continue
+
+        if lowered.startswith('accept group '):
+            group_name = text[len('accept group '):].strip()
+            if not group_name:
+                print("Usage: accept group [group_name]")
+                continue
+            client.send(f'accept group {group_name}'.encode())
+            continue
+
+        if lowered.startswith('reject group '):
+            group_name = text[len('reject group '):].strip()
+            if not group_name:
+                print("Usage: reject group [group_name]")
+                continue
+            client.send(f'reject group {group_name}'.encode())
+            continue
+
+        if lowered == 'my groups':
+            if groups:
+                print(f"My groups: {', '.join(sorted(groups))}")
+            else:
+                print("My groups: none")
+            client.send('my groups'.encode())
+            continue
+
+        if lowered.startswith('group txt '):
+            payload = text[len('group txt '):].strip()
+            parts = payload.split(' ', 1)
+            if len(parts) < 2:
+                print("Usage: group txt [group_name] [message]")
+                continue
+            group_name, group_message = parts[0].strip(), parts[1].strip()
+            if not group_message:
+                print("Group message cannot be empty")
+                continue
+            client.send(f'group txt {group_name} {group_message}'.encode())
             continue
 
         if text.startswith('connect to '):
@@ -295,7 +374,7 @@ def client_send():
             client.send(f"private txt {target} {actual_text}".encode())
             continue
 
-        print("Invalid command. Use: bdct txt {your message}, online clients, connect to [client], accept connection [client], reject connection [client], my private chats, private txt [client] {your message}, end private [client], or exit")
+        print("Invalid command. Use: bdct txt {your message}, online clients, connect to [client], accept connection [client], reject connection [client], my private chats, private txt [client] {your message}, create group [group_name], invite group [group_name] [client], accept group [group_name], reject group [group_name], my groups, group txt [group_name] [message], send file [client] [file_path], end private [client], or exit")
 
     # Start receive and send threads after authentication is successful
 if authenticate():

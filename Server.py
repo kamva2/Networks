@@ -15,6 +15,9 @@ aliases = []
 # We will also keep track of pending private chat requests and active private chat connections
 pending_requests = {}
 private_partners = {}
+groups = {}
+group_owners = {}
+group_invites = {}
 
 #Have to broadcast a message for the chat box or clients that are connected
 def broadcast(message, sender=None):
@@ -45,6 +48,13 @@ def resolve_alias(raw_alias):
     for online_alias in aliases:
         if online_alias.lower() == raw_alias.lower():
             return online_alias
+    return None
+
+
+def resolve_group_name(raw_group_name):
+    for group_name in groups:
+        if group_name.lower() == raw_group_name.lower():
+            return group_name
     return None
 
 # This function ensures an alias has a private partner set initialized
@@ -98,6 +108,39 @@ def cleanup_pending_requests(aliase):
     for target in targets_to_remove:
         pending_requests.pop(target, None)
 
+
+def cleanup_group_invites(aliase):
+    group_invites.pop(aliase, None)
+
+
+def cleanup_groups_for_alias(aliase):
+    removed_groups = []
+    for group_name, members in list(groups.items()):
+        if aliase in members:
+            members.discard(aliase)
+            if not members:
+                removed_groups.append(group_name)
+                continue
+
+            for member in members:
+                send_to_alias(member, f"INFO: {aliase} left group {group_name}")
+
+            if group_owners.get(group_name) == aliase:
+                new_owner = sorted(members)[0]
+                group_owners[group_name] = new_owner
+                send_to_alias(new_owner, f"INFO: You are now owner of group {group_name}")
+
+    for group_name in removed_groups:
+        groups.pop(group_name, None)
+        group_owners.pop(group_name, None)
+
+    for invitee, invited_groups in list(group_invites.items()):
+        to_remove = [name for name in invited_groups if name in removed_groups]
+        for name in to_remove:
+            invited_groups.discard(name)
+        if not invited_groups:
+            group_invites.pop(invitee, None)
+
 # This is the function that removes the client from the server when they disconnect or exit the chatroom
 def remove_client(client):
     if client not in clients:
@@ -115,9 +158,132 @@ def remove_client(client):
 
     cleanup_pending_requests(aliase)
     end_private_connection(aliase)
+    cleanup_group_invites(aliase)
+    cleanup_groups_for_alias(aliase)
 
     broadcast(f"{aliase} has left the chatroom".encode())
     database.record_logout(aliase)
+
+
+def handle_create_group(aliase, text):
+    group_name = text[len('create group '):].strip()
+    if not group_name:
+        return "INFO: create group [group_name]"
+
+    existing = resolve_group_name(group_name)
+    if existing is not None:
+        return f"INFO: Group {existing} already exists"
+
+    groups[group_name] = {aliase}
+    group_owners[group_name] = aliase
+    return f"GROUP_JOINED:{group_name}"
+
+
+def handle_invite_group(aliase, text):
+    payload = text[len('invite group '):].strip()
+    parts = payload.split(maxsplit=1)
+    if len(parts) < 2:
+        return "INFO: invite group [group_name] [client]"
+
+    group_raw, target_raw = parts[0], parts[1].strip()
+    group_name = resolve_group_name(group_raw)
+    if group_name is None:
+        return "INFO: Group does not exist"
+
+    if group_owners.get(group_name) != aliase:
+        return "INFO: Only the group owner can invite members"
+
+    target = resolve_alias(target_raw)
+    if target is None:
+        return "INFO: Target member is not online"
+
+    if target in groups[group_name]:
+        return f"INFO: {target} is already in group {group_name}"
+
+    if target not in group_invites:
+        group_invites[target] = set()
+
+    if group_name in group_invites[target]:
+        return f"INFO: {target} already has an invite to {group_name}"
+
+    group_invites[target].add(group_name)
+    send_to_alias(target, f"GROUP_INVITE:{group_name}:{aliase}")
+    return f"INFO: Group invite sent to {target} for {group_name}"
+
+
+def handle_accept_group(aliase, text):
+    group_raw = text[len('accept group '):].strip()
+    if not group_raw:
+        return "INFO: accept group [group_name]"
+
+    group_name = resolve_group_name(group_raw)
+    if group_name is None:
+        return "INFO: Group does not exist"
+
+    if aliase not in group_invites or group_name not in group_invites[aliase]:
+        return f"INFO: No pending invite for group {group_raw}"
+
+    group_invites[aliase].discard(group_name)
+    if not group_invites[aliase]:
+        group_invites.pop(aliase, None)
+
+    groups[group_name].add(aliase)
+    for member in groups[group_name]:
+        if member != aliase:
+            send_to_alias(member, f"INFO: {aliase} joined group {group_name}")
+    return f"GROUP_JOINED:{group_name}"
+
+
+def handle_reject_group(aliase, text):
+    group_raw = text[len('reject group '):].strip()
+    if not group_raw:
+        return "INFO: reject group [group_name]"
+
+    group_name = resolve_group_name(group_raw)
+    if group_name is None:
+        return "INFO: Group does not exist"
+
+    if aliase not in group_invites or group_name not in group_invites[aliase]:
+        return f"INFO: No pending invite for group {group_raw}"
+
+    group_invites[aliase].discard(group_name)
+    if not group_invites[aliase]:
+        group_invites.pop(aliase, None)
+
+    owner = group_owners.get(group_name)
+    if owner:
+        send_to_alias(owner, f"INFO: {aliase} rejected invite to group {group_name}")
+    return f"INFO: Rejected invite to group {group_name}"
+
+
+def handle_my_groups(aliase):
+    mine = sorted([group_name for group_name, members in groups.items() if aliase in members])
+    if not mine:
+        return "Groups: none"
+    return f"Groups: {', '.join(mine)}"
+
+
+def handle_group_message(aliase, raw_text):
+    payload = raw_text[len('group txt '):].strip()
+    parts = payload.split(maxsplit=1)
+    if len(parts) < 2:
+        return "INFO: group txt [group_name] [message]"
+
+    group_raw, group_text = parts[0], parts[1].strip()
+    if not group_text:
+        return "INFO: Group message cannot be empty"
+
+    group_name = resolve_group_name(group_raw)
+    if group_name is None:
+        return "INFO: Group does not exist"
+
+    if aliase not in groups[group_name]:
+        return f"INFO: You are not a member of group {group_name}"
+
+    for member in groups[group_name]:
+        if member != aliase:
+            send_to_alias(member, f"[Group:{group_name}] {aliase}: {group_text}")
+    return ""
 
 def can_relay_file(sender_alias, target_alias):
     if target_alias is None:
@@ -352,6 +518,37 @@ def handle_client(client, aliase, address):
             if text == 'online clients':
                 online_list = ', '.join(aliases) if aliases else 'No clients online.'
                 client.send(f"Online clients: {online_list}".encode())
+                continue
+
+            if text.startswith('create group '):
+                response = handle_create_group(aliase, raw_text)
+                client.send(response.encode())
+                continue
+
+            if text.startswith('invite group '):
+                response = handle_invite_group(aliase, raw_text)
+                client.send(response.encode())
+                continue
+
+            if text.startswith('accept group '):
+                response = handle_accept_group(aliase, raw_text)
+                client.send(response.encode())
+                continue
+
+            if text.startswith('reject group '):
+                response = handle_reject_group(aliase, raw_text)
+                client.send(response.encode())
+                continue
+
+            if text == 'my groups':
+                response = handle_my_groups(aliase)
+                client.send(response.encode())
+                continue
+
+            if text.startswith('group txt '):
+                response = handle_group_message(aliase, raw_text)
+                if response:
+                    client.send(response.encode())
                 continue
 
             if text.startswith('connect to '):
