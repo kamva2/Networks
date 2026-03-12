@@ -18,6 +18,7 @@ private_partners = {}
 groups = {}
 group_owners = {}
 group_invites = {}
+offline_inbox = {}
 
 #Have to broadcast a message for the chat box or clients that are connected
 def broadcast(message, sender=None):
@@ -50,12 +51,45 @@ def resolve_alias(raw_alias):
             return online_alias
     return None
 
-
+# This function resolves group name case-insensitively to the group name in the server
 def resolve_group_name(raw_group_name):
     for group_name in groups:
         if group_name.lower() == raw_group_name.lower():
             return group_name
     return None
+
+# This function resolves a registered alias case-insensitively to the registered username in the database, even if they are not currently online.
+# This allows for offline messaging and group invites to work with correct casing when the user is not currently connected.
+def resolve_registered_alias(raw_alias):
+    db = database.load_database()
+    for user in db.get("users", []):
+        username = database.get_user_name(user)
+        if username and username.lower() == raw_alias.lower():
+            return username
+    return None
+
+
+def queue_offline_message(target_alias, message):
+    if target_alias not in offline_inbox:
+        offline_inbox[target_alias] = []
+    offline_inbox[target_alias].append(message)
+
+# This is the function that delivers pending private chat requests, group invites, and offline messages to a client when they connect to the server
+def deliver_offline_for_alias(aliase):
+    # Redeliver pending private requests that were sent while this user was offline.
+    for requester in sorted(pending_requests.get(aliase, set())):
+        send_to_alias(aliase, f"PRIVATE_REQUEST_FROM:{requester}")
+
+    # Redeliver pending group invites while preserving inviter information.
+    invite_map = group_invites.get(aliase, {})
+    for group_name in sorted(invite_map.keys()):
+        inviter = invite_map[group_name]
+        send_to_alias(aliase, f"GROUP_INVITE:{group_name}:{inviter}")
+
+    # Deliver queued offline messages and clear mailbox.
+    queued = offline_inbox.pop(aliase, [])
+    for msg in queued:
+        send_to_alias(aliase, msg)
 
 # This function ensures an alias has a private partner set initialized
 def ensure_private_partner_set(aliase):
@@ -92,12 +126,6 @@ def end_private_connection(aliase):
 
 # This is the function that cleans up any pending private chat requests when a client disconnects or exits the chatroom
 def cleanup_pending_requests(aliase):
-    # Notify everyone who requested this user.
-    if aliase in pending_requests:
-        requesters = list(pending_requests.pop(aliase))
-        for requester in requesters:
-            send_to_alias(requester, f"INFO: {aliase} is no longer available for private chat")
-
     # Remove requests sent by this user to others.
     targets_to_remove = []
     for target, requesters in pending_requests.items():
@@ -112,7 +140,7 @@ def cleanup_pending_requests(aliase):
 def cleanup_group_invites(aliase):
     group_invites.pop(aliase, None)
 
-
+# This is the function that cleans up any group memberships, ownerships, and pending invites when a client disconnects or exits the chatroom
 def cleanup_groups_for_alias(aliase):
     removed_groups = []
     for group_name, members in list(groups.items()):
@@ -135,9 +163,9 @@ def cleanup_groups_for_alias(aliase):
         group_owners.pop(group_name, None)
 
     for invitee, invited_groups in list(group_invites.items()):
-        to_remove = [name for name in invited_groups if name in removed_groups]
+        to_remove = [name for name in invited_groups.keys() if name in removed_groups]
         for name in to_remove:
-            invited_groups.discard(name)
+            invited_groups.pop(name, None)
         if not invited_groups:
             group_invites.pop(invitee, None)
 
@@ -195,20 +223,25 @@ def handle_invite_group(aliase, text):
 
     target = resolve_alias(target_raw)
     if target is None:
-        return "INFO: Target member is not online"
+        target = resolve_registered_alias(target_raw)
+    if target is None:
+        return "INFO: Target alias does not exist"
 
     if target in groups[group_name]:
         return f"INFO: {target} is already in group {group_name}"
 
     if target not in group_invites:
-        group_invites[target] = set()
+        group_invites[target] = {}
 
-    if group_name in group_invites[target]:
+    if group_name in group_invites[target].keys():
         return f"INFO: {target} already has an invite to {group_name}"
 
-    group_invites[target].add(group_name)
-    send_to_alias(target, f"GROUP_INVITE:{group_name}:{aliase}")
-    return f"INFO: Group invite sent to {target} for {group_name}"
+    group_invites[target][group_name] = aliase
+    if target in aliases:
+        send_to_alias(target, f"GROUP_INVITE:{group_name}:{aliase}")
+        return f"INFO: Group invite sent to {target} for {group_name}"
+
+    return f"INFO: {target} is offline. Group invite queued for delivery."
 
 
 def handle_accept_group(aliase, text):
@@ -220,10 +253,10 @@ def handle_accept_group(aliase, text):
     if group_name is None:
         return "INFO: Group does not exist"
 
-    if aliase not in group_invites or group_name not in group_invites[aliase]:
+    if aliase not in group_invites or group_name not in group_invites[aliase].keys():
         return f"INFO: No pending invite for group {group_raw}"
 
-    group_invites[aliase].discard(group_name)
+    group_invites[aliase].pop(group_name, None)
     if not group_invites[aliase]:
         group_invites.pop(aliase, None)
 
@@ -243,10 +276,10 @@ def handle_reject_group(aliase, text):
     if group_name is None:
         return "INFO: Group does not exist"
 
-    if aliase not in group_invites or group_name not in group_invites[aliase]:
+    if aliase not in group_invites or group_name not in group_invites[aliase].keys():
         return f"INFO: No pending invite for group {group_raw}"
 
-    group_invites[aliase].discard(group_name)
+    group_invites[aliase].pop(group_name, None)
     if not group_invites[aliase]:
         group_invites.pop(aliase, None)
 
@@ -282,7 +315,11 @@ def handle_group_message(aliase, raw_text):
 
     for member in groups[group_name]:
         if member != aliase:
-            send_to_alias(member, f"[Group:{group_name}] {aliase}: {group_text}")
+            message = f"[Group:{group_name}] {aliase}: {group_text}"
+            if member in aliases:
+                send_to_alias(member, message)
+            else:
+                queue_offline_message(member, message)
     return ""
 
 def can_relay_file(sender_alias, target_alias):
@@ -344,25 +381,29 @@ def handle_connect_request(aliase, text):
     if not requested_alias:
         return "INFO: connect to [client]"
 
-    requested_alias = resolve_alias(requested_alias)
-    if requested_alias is None:
-        return "INFO: Target alias is not online"
+    online_target = resolve_alias(requested_alias)
+    resolved_target = online_target if online_target is not None else resolve_registered_alias(requested_alias)
+    if resolved_target is None:
+        return "INFO: Target alias does not exist"
 
-    if requested_alias == aliase:
+    if resolved_target.lower() == aliase.lower():
         return "INFO: You cannot connect to yourself"
 
-    if requested_alias in private_partners.get(aliase, set()):
-        return f"INFO: You already have a private connection with {requested_alias}"
+    if resolved_target in private_partners.get(aliase, set()):
+        return f"INFO: You already have a private connection with {resolved_target}"
 
-    if requested_alias not in pending_requests:
-        pending_requests[requested_alias] = set()
+    if resolved_target not in pending_requests:
+        pending_requests[resolved_target] = set()
 
-    if aliase in pending_requests[requested_alias]:
-        return f"INFO: You already sent a request to {requested_alias}"
+    if aliase in pending_requests[resolved_target]:
+        return f"INFO: You already sent a request to {resolved_target}"
 
-    pending_requests[requested_alias].add(aliase)
-    send_to_alias(requested_alias, f"PRIVATE_REQUEST_FROM:{aliase}")
-    return f"INFO: Connection request sent to {requested_alias}"
+    pending_requests[resolved_target].add(aliase)
+    if online_target is not None:
+        send_to_alias(online_target, f"PRIVATE_REQUEST_FROM:{aliase}")
+        return f"INFO: Connection request sent to {online_target}"
+
+    return f"INFO: {resolved_target} is offline. Invitation queued for delivery."
 
 # This is the function that handles the client's request to accept a private chat request
 def handle_accept_request(aliase, text):
@@ -436,14 +477,18 @@ def handle_private_message(aliase, raw_text):
         return "INFO: Private message cannot be empty"
 
     target = resolve_alias(target_raw)
-    if target is None:
-        return "INFO: Target alias is not online"
+    if target is not None:
+        if target not in private_partners.get(aliase, set()):
+            return f"INFO: No private connection with {target_raw}"
+        send_to_alias(target, f"[Private:{target}] {aliase}: {private_text}")
+        return ""
 
-    if target not in private_partners.get(aliase, set()):
-        return f"INFO: No private connection with {target_raw}"
+    offline_target = resolve_registered_alias(target_raw)
+    if offline_target is None:
+        return "INFO: Target alias does not exist"
 
-    send_to_alias(target, f"[Private:{target}] {aliase}: {private_text}")
-    return ""
+    queue_offline_message(offline_target, f"[Offline Private] {aliase}: {private_text}")
+    return f"INFO: {offline_target} is offline. Message queued for delivery."
 
 
 # This is the function that authenticates the client when they first connect to the server
@@ -610,6 +655,7 @@ def receive():
         
         broadcast(f"{aliase} has connected to the chatroom".encode())
         client.send("you are now connected".encode())
+        deliver_offline_for_alias(aliase)
 
         #Then for this program to support multiple clients we have to introduce multi-threading
         thread = threading.Thread(target=handle_client, args=(client, aliase, address))
