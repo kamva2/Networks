@@ -7,12 +7,41 @@ import uuid
 server_ip = input("Enter server IP address: ")
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client.connect((server_ip, 22081))
+beep_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+beep_socket.bind(("", 0))
+beep_port = beep_socket.getsockname()[1]
 aliase = ""
 private_partners = set()
 pending_requesters = set()
 groups = set()
 pending_group_invites = set()
 incoming_transfers = {}
+
+
+def register_beep_port():
+    try:
+        client.send(f"BEEP_UDP_PORT:{beep_port}".encode())
+    except:
+        print("Failed to register UDP beep port")
+
+
+def beep_receive():
+    while True:
+        try:
+            payload, _ = beep_socket.recvfrom(4096)
+            text = payload.decode(errors='ignore')
+            if not text.startswith("BEEP:"):
+                continue
+
+            parts = text.split(":", 2)
+            if len(parts) != 3:
+                continue
+
+            sender = parts[1].strip()
+            channel = parts[2].strip()
+            print(f"\a[Beep] {sender} sent a message in {channel}")
+        except:
+            break
 
 # Keep only basename to prevent writing outside project folders.
 def safe_filename(name):
@@ -236,6 +265,10 @@ def client_send():
             except:
                 pass
             client.close()
+            try:
+                beep_socket.close()
+            except:
+                pass
             break
 
         if lowered == 'online clients':
@@ -378,6 +411,11 @@ def client_send():
 
     # Start receive and send threads after authentication is successful
 if authenticate():
+    register_beep_port()
+
+    beep_thread = threading.Thread(target=beep_receive, daemon=True)
+    beep_thread.start()
+
     receive_thread = threading.Thread(target=client_receive)
     receive_thread.start()
 

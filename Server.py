@@ -8,6 +8,7 @@ port = 22081
 server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 server.bind((host,port))
 server.listen()
+beep_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 #We keeping track of people who have connected to the server with their aliase and the port
 clients = []
@@ -19,6 +20,7 @@ groups = {}
 group_owners = {}
 group_invites = {}
 offline_inbox = {}
+beep_endpoints = {}
 
 #Have to broadcast a message for the chat box or clients that are connected
 def broadcast(message, sender=None):
@@ -43,6 +45,25 @@ def send_to_alias(aliase, message):
         return True
     except:
         return False
+
+
+def register_beep_endpoint(aliase, ip_address, udp_port):
+    beep_endpoints[aliase] = (ip_address, udp_port)
+
+
+def remove_beep_endpoint(aliase):
+    beep_endpoints.pop(aliase, None)
+
+
+def send_beep(to_alias, from_alias, channel):
+    endpoint = beep_endpoints.get(to_alias)
+    if endpoint is None:
+        return
+    try:
+        beep_socket.sendto(f"BEEP:{from_alias}:{channel}".encode(), endpoint)
+    except:
+        pass
+
 
 # This function resolves alias case-insensitively to the canonical online alias
 def resolve_alias(raw_alias):
@@ -188,6 +209,7 @@ def remove_client(client):
     end_private_connection(aliase)
     cleanup_group_invites(aliase)
     cleanup_groups_for_alias(aliase)
+    remove_beep_endpoint(aliase)
 
     broadcast(f"{aliase} has left the chatroom".encode())
     database.record_logout(aliase)
@@ -318,6 +340,7 @@ def handle_group_message(aliase, raw_text):
             message = f"[Group:{group_name}] {aliase}: {group_text}"
             if member in aliases:
                 send_to_alias(member, message)
+                send_beep(member, aliase, f"GROUP:{group_name}")
             else:
                 queue_offline_message(member, message)
     return ""
@@ -542,6 +565,17 @@ def handle_client(client, aliase, address):
             raw_text = message.decode(errors='ignore').strip()
             text = raw_text.lower()
 
+            if raw_text.startswith("BEEP_UDP_PORT:"):
+                try:
+                    udp_port = int(raw_text.split(":", 1)[1].strip())
+                    if udp_port <= 0 or udp_port > 65535:
+                        raise ValueError
+                    register_beep_endpoint(aliase, address[0], udp_port)
+                    client.send("INFO: UDP beep port registered".encode())
+                except:
+                    client.send("INFO: Invalid UDP beep port".encode())
+                continue
+
             if raw_text.startswith("FILE_START|"):
                 response = handle_file_start(aliase, raw_text)
                 if response:
@@ -630,6 +664,10 @@ def handle_client(client, aliase, address):
                     client.send(response.encode())
                 continue
 
+            # Any free-form message that reaches this point is treated as broadcast text.
+            for online_alias in aliases:
+                if online_alias != aliase:
+                    send_beep(online_alias, aliase, "BROADCAST")
             broadcast(message, sender=client)
         except:
             remove_client(client)
