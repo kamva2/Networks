@@ -17,14 +17,14 @@ groups = set()
 pending_group_invites = set()
 incoming_transfers = {}
 
-
+# This function registers the UDP port for receiving beep notifications from the server, so that when another user sends a beep to this client, the server knows where to forward it.
 def register_beep_port():
     try:
         client.send(f"BEEP_UDP_PORT:{beep_port}".encode())
     except:
         print("Failed to register UDP beep port")
 
-
+# This function runs in a separate thread and listens for incoming UDP messages on the beep socket. When it receives a message that starts with "BEEP:", it parses the sender and channel information and prints a notification to the console.
 def beep_receive():
     while True:
         try:
