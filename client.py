@@ -72,7 +72,7 @@ def beep_receive():
 def safe_filename(name):
     return os.path.basename(name)
 
-
+# This function ensures that the "downloads" directory exists in the current working directory and returns its path. This is where incoming files will be saved.
 def ensure_download_dir():
     download_dir = os.path.join(os.getcwd(), "downloads")
     os.makedirs(download_dir, exist_ok=True)

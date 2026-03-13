@@ -26,6 +26,13 @@ def save_database(data):
     with open(DATABASE_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
+#Clear the client connection database (for testing purposes)
+def clear_database():
+    
+    empty_db = {"users": [], "connections": []}
+    save_database(empty_db)
+    return empty_db
+
 
 def get_user_name(user):
     return user.get("aliase") or user.get("username")
