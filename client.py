@@ -4,24 +4,49 @@ import os
 import base64
 import uuid
 
-server_ip = input("Enter server IP address: ")
+server_ip = input("Enter server IP address: ").strip()
+
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client.connect((server_ip, 22081))
+
 beep_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 beep_socket.bind(("", 0))
 beep_port = beep_socket.getsockname()[1]
+
 aliase = ""
 private_partners = set()
 pending_requesters = set()
 groups = set()
 pending_group_invites = set()
 incoming_transfers = {}
+client_buffer = b""
+running = True
+
+
+def send_packet(text):
+    try:
+        client.sendall((text + "\n").encode())
+        return True
+    except:
+        return False
+
+
+def recv_line():
+    global client_buffer
+    while True:
+        if b"\n" in client_buffer:
+            line, rest = client_buffer.split(b"\n", 1)
+            client_buffer = rest
+            return line.decode(errors="ignore").rstrip("\r")
+
+        chunk = client.recv(4096)
+        if not chunk:
+            return None
+        client_buffer += chunk
 
 
 def register_beep_port():
-    try:
-        client.send(f"BEEP_UDP_PORT:{beep_port}".encode())
-    except:
+    if not send_packet(f"BEEP_UDP_PORT:{beep_port}"):
         print("Failed to register UDP beep port")
 
 
@@ -29,7 +54,7 @@ def beep_receive():
     while True:
         try:
             payload, _ = beep_socket.recvfrom(4096)
-            text = payload.decode(errors='ignore')
+            text = payload.decode(errors="ignore")
             if not text.startswith("BEEP:"):
                 continue
 
@@ -43,16 +68,16 @@ def beep_receive():
         except:
             break
 
-# Keep only basename to prevent writing outside project folders.
+
 def safe_filename(name):
-    
     return os.path.basename(name)
 
-#Load the client connection database from JSON file, or create a new one if it doesn't exist
+
 def ensure_download_dir():
     download_dir = os.path.join(os.getcwd(), "downloads")
     os.makedirs(download_dir, exist_ok=True)
     return download_dir
+
 
 def finalize_incoming_transfer(sender, transfer_id, total_chunks):
     transfer = incoming_transfers.get(transfer_id)
@@ -69,14 +94,23 @@ def finalize_incoming_transfer(sender, transfer_id, total_chunks):
     file_bytes = b"".join(chunks[idx] for idx in range(total_chunks))
     download_dir = ensure_download_dir()
     out_path = os.path.join(download_dir, transfer["filename"])
-    with open(out_path, "wb") as out_file:
-        out_file.write(file_bytes)
 
-    print(f"File received from {sender}: {out_path}")
+    base_name, extension = os.path.splitext(out_path)
+    counter = 1
+    while os.path.exists(out_path):
+        out_path = f"{base_name}_{counter}{extension}"
+        counter += 1
+
+    try:
+        with open(out_path, "wb") as out_file:
+            out_file.write(file_bytes)
+        print(f"File received from {sender}: {out_path}")
+    except Exception as ex:
+        print(f"Failed to save file from {sender}: {ex}")
+
     incoming_transfers.pop(transfer_id, None)
 
 
-# This sends file chunks to server over TCP, and server relays them to the private target.
 def send_file_via_tcp(target, file_path):
     if not os.path.isfile(file_path):
         print(f"File not found: {file_path}")
@@ -95,23 +129,36 @@ def send_file_via_tcp(target, file_path):
     total_chunks = (len(data) + chunk_size - 1) // chunk_size
 
     try:
-        client.send(f"FILE_START|{target}|{filename}|{len(data)}|{transfer_id}".encode())
+        if not send_packet(f"FILE_START|{target}|{filename}|{len(data)}|{transfer_id}"):
+            print("Failed to send file start packet")
+            return
+
         for idx in range(total_chunks):
             chunk = data[idx * chunk_size:(idx + 1) * chunk_size]
             chunk_b64 = base64.b64encode(chunk).decode()
-            client.send(f"FILE_CHUNK|{target}|{transfer_id}|{idx}|{chunk_b64}".encode())
-        client.send(f"FILE_END|{target}|{transfer_id}|{total_chunks}".encode())
+            if not send_packet(f"FILE_CHUNK|{target}|{transfer_id}|{idx}|{chunk_b64}"):
+                print("Failed during file transfer")
+                return
+
+        if not send_packet(f"FILE_END|{target}|{transfer_id}|{total_chunks}"):
+            print("Failed to send file end packet")
+            return
+
         print(f"File sent to {target}: {filename}")
     except Exception as ex:
         print(f"Failed to send file over TCP: {ex}")
 
-# This is the function that handles the authentication process with the server, including registering or logging in, and setting the aliase for the client
+
 def authenticate():
     global aliase
 
     while True:
         try:
-            message = client.recv(1024).decode()
+            message = recv_line()
+            if message is None:
+                print("Connection closed during authentication.")
+                client.close()
+                return False
         except:
             print("An error occurred during authentication!")
             client.close()
@@ -119,15 +166,28 @@ def authenticate():
 
         if message.startswith("Authorise MODE?"):
             mode = input("Choose auth mode (REGISTER/LOGIN): ").strip().upper()
-            client.send(mode.encode())
+            if not send_packet(mode):
+                print("Failed to send authentication mode.")
+                return False
+
         elif message == "ALIAS?":
             aliase = input("Enter aliase name: ").strip()
-            client.send(aliase.encode())
+            if not send_packet(aliase):
+                print("Failed to send alias.")
+                return False
+
         elif message == "PASSWORD?":
             password = input("Enter password: ").strip()
-            client.send(password.encode())
-        elif message.startswith("ERROR:") or message.startswith("INFO:"):
+            if not send_packet(password):
+                print("Failed to send password.")
+                return False
+
+        elif message.startswith("ERROR:") or message.startswith("INFO:") or message == "This alias is already logged in":
             print(message)
+
+        elif message == "Registration successful. You can login now.":
+            print(message)
+
         elif message in ("AUTH_SUCCESS", "SUCCESSFULLY AUTHENTICATE"):
             print("Authentication successful, Welcome to Chat77!")
             print(
@@ -150,16 +210,24 @@ def authenticate():
                 "To exit chat77 :(- exit"
             )
             return True
+
         else:
             print(message)
 
-# This is the function that handles receiving messages from the server and printing them to the console, including handling private chat requests and connections
-def client_receive():
-    global private_partners, pending_requesters, groups, pending_group_invites
 
-    while True:
+def client_receive():
+    global private_partners, pending_requesters, groups, pending_group_invites, running
+
+    while running:
         try:
-            message = client.recv(1024).decode()
+            message = recv_line()
+            if message is None:
+                print("Connection closed")
+                try:
+                    client.close()
+                except:
+                    pass
+                break
 
             if message.startswith("PRIVATE_REQUEST_FROM:"):
                 requester = message.split(":", 1)[1]
@@ -204,10 +272,19 @@ def client_receive():
                 print(f"You joined group: {group_name}")
                 continue
 
+            if message.startswith("Groups: "):
+                print(message)
+                continue
+
+            if message.startswith("Private chats: "):
+                print(message)
+                continue
+
             if message.startswith("FILE_START_FROM|"):
                 parts = message.split("|", 4)
                 if len(parts) != 5:
                     continue
+
                 sender, filename, size_str, transfer_id = parts[1], parts[2], parts[3], parts[4]
                 incoming_transfers[transfer_id] = {
                     "sender": sender,
@@ -222,14 +299,17 @@ def client_receive():
                 parts = message.split("|", 4)
                 if len(parts) != 5:
                     continue
+
                 transfer_id = parts[2]
                 seq_str = parts[3]
                 if transfer_id not in incoming_transfers or not seq_str.isdigit():
                     continue
+
                 try:
                     chunk_data = base64.b64decode(parts[4].encode())
                 except:
                     continue
+
                 incoming_transfers[transfer_id]["chunks"][int(seq_str)] = chunk_data
                 continue
 
@@ -237,34 +317,49 @@ def client_receive():
                 parts = message.split("|", 3)
                 if len(parts) != 4:
                     continue
+
                 sender = parts[1]
                 transfer_id = parts[2]
                 total_chunks_str = parts[3]
                 if not total_chunks_str.isdigit():
                     continue
+
                 finalize_incoming_transfer(sender, transfer_id, int(total_chunks_str))
                 continue
 
             print(message)
+
         except:
             print("Connection closed")
-            client.close()
+            try:
+                client.close()
+            except:
+                pass
             break
 
-# This is the function that handles sending messages to the server based on user input, including broadcasting messages, sending private messages, and handling connection requests
+
 def client_send():
-    global private_partners, groups
+    global private_partners, groups, running
+
     while True:
-        text = input("")
+        try:
+            text = input("")
+        except EOFError:
+            text = "exit"
+
         lowered = text.lower().strip()
 
-        if text.lower() == 'exit':
-            client.send('exit'.encode())
+        if lowered == 'exit':
+            send_packet('exit')
+            running = False
             try:
                 client.shutdown(socket.SHUT_RDWR)
             except:
                 pass
-            client.close()
+            try:
+                client.close()
+            except:
+                pass
             try:
                 beep_socket.close()
             except:
@@ -272,7 +367,7 @@ def client_send():
             break
 
         if lowered == 'online clients':
-            client.send('online clients'.encode())
+            send_packet('online clients')
             continue
 
         if lowered.startswith('create group '):
@@ -280,7 +375,7 @@ def client_send():
             if not group_name:
                 print("Usage: create group [group_name]")
                 continue
-            client.send(f'create group {group_name}'.encode())
+            send_packet(f'create group {group_name}')
             continue
 
         if lowered.startswith('invite group '):
@@ -290,7 +385,7 @@ def client_send():
                 print("Usage: invite group [group_name] [client]")
                 continue
             group_name, target = parts[0].strip(), parts[1].strip()
-            client.send(f'invite group {group_name} {target}'.encode())
+            send_packet(f'invite group {group_name} {target}')
             continue
 
         if lowered.startswith('accept group '):
@@ -298,7 +393,7 @@ def client_send():
             if not group_name:
                 print("Usage: accept group [group_name]")
                 continue
-            client.send(f'accept group {group_name}'.encode())
+            send_packet(f'accept group {group_name}')
             continue
 
         if lowered.startswith('reject group '):
@@ -306,15 +401,11 @@ def client_send():
             if not group_name:
                 print("Usage: reject group [group_name]")
                 continue
-            client.send(f'reject group {group_name}'.encode())
+            send_packet(f'reject group {group_name}')
             continue
 
         if lowered == 'my groups':
-            if groups:
-                print(f"My groups: {', '.join(sorted(groups))}")
-            else:
-                print("My groups: none")
-            client.send('my groups'.encode())
+            send_packet('my groups')
             continue
 
         if lowered.startswith('group txt '):
@@ -327,15 +418,15 @@ def client_send():
             if not group_message:
                 print("Group message cannot be empty")
                 continue
-            client.send(f'group txt {group_name} {group_message}'.encode())
+            send_packet(f'group txt {group_name} {group_message}')
             continue
 
-        if text.startswith('connect to '):
+        if lowered.startswith('connect to '):
             target = text[11:].strip()
             if not target:
                 print("Usage: connect to [client]")
                 continue
-            client.send(f"connect to {target}".encode())
+            send_packet(f"connect to {target}")
             continue
 
         if lowered.startswith('accept connection '):
@@ -343,7 +434,7 @@ def client_send():
             if not requester:
                 print("Usage: accept connection [client]")
                 continue
-            client.send(f'accept connection {requester}'.encode())
+            send_packet(f'accept connection {requester}')
             continue
 
         if lowered.startswith('reject connection '):
@@ -351,14 +442,11 @@ def client_send():
             if not requester:
                 print("Usage: reject connection [client]")
                 continue
-            client.send(f'reject connection {requester}'.encode())
+            send_packet(f'reject connection {requester}')
             continue
 
         if lowered == 'my private chats':
-            if private_partners:
-                print(f"My private chats: {', '.join(sorted(private_partners))}")
-            else:
-                print("My private chats: none")
+            send_packet('my private chats')
             continue
 
         if lowered.startswith('end private '):
@@ -366,7 +454,7 @@ def client_send():
             if not target:
                 print("Usage: end private [client]")
                 continue
-            client.send(f'end private {target}'.encode())
+            send_packet(f'end private {target}')
             continue
 
         if lowered.startswith('send file '):
@@ -375,10 +463,14 @@ def client_send():
             if len(parts) < 2:
                 print("Usage: send file [client] [file_path]")
                 continue
-            target, file_path = parts[0].strip(), parts[1].strip().strip('"')
+
+            target = parts[0].strip()
+            file_path = parts[1].strip().strip('"')
+
             if target not in private_partners:
                 print(f"No active private chat with {target}. Use: connect to {target}")
                 continue
+
             send_file_via_tcp(target, file_path)
             continue
 
@@ -388,8 +480,7 @@ def client_send():
                 print("Broadcast message cannot be empty. Use: bdct txt {your message}")
                 continue
 
-            message = f'{aliase}: {actual_text}'
-            client.send(message.encode())
+            send_packet(f'{aliase}: {actual_text}')
             continue
 
         if lowered.startswith('private txt '):
@@ -397,6 +488,7 @@ def client_send():
             if not payload or ' ' not in payload:
                 print("Usage: private txt [client] {your message}")
                 continue
+
             target, actual_text = payload.split(' ', 1)
             if target not in private_partners:
                 print(f"No active private chat with {target}. Use: my private chats")
@@ -404,20 +496,22 @@ def client_send():
             if not actual_text.strip():
                 print("Private message cannot be empty")
                 continue
-            client.send(f"private txt {target} {actual_text}".encode())
+
+            send_packet(f"private txt {target} {actual_text}")
             continue
 
         print("Invalid command. Use: bdct txt {your message}, online clients, connect to [client], accept connection [client], reject connection [client], my private chats, private txt [client] {your message}, create group [group_name], invite group [group_name] [client], accept group [group_name], reject group [group_name], my groups, group txt [group_name] [message], send file [client] [file_path], end private [client], or exit")
 
-    # Start receive and send threads after authentication is successful
+
 if authenticate():
     register_beep_port()
 
     beep_thread = threading.Thread(target=beep_receive, daemon=True)
     beep_thread.start()
 
-    receive_thread = threading.Thread(target=client_receive)
+    receive_thread = threading.Thread(target=client_receive, daemon=True)
     receive_thread.start()
 
     send_thread = threading.Thread(target=client_send)
     send_thread.start()
+    send_thread.join()
