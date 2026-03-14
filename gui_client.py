@@ -144,8 +144,6 @@ class Chat77App(tk.Tk):
         self._current_mode = None
         self._connecting = False
         self._online_users_callback = None
-        self._auth_failed_retryable = False
-        self._emoji_popup = None
 
         self._build_login_screen()
 
@@ -352,37 +350,31 @@ class Chat77App(tk.Tk):
         self.login_status.config(text="Connecting…", fg=FG_SECONDARY)
         self.update()
 
-        # Reuse the same socket after a retryable auth error instead of closing it.
-        need_new_socket = self.sock is None
+        self._cleanup_sockets()
 
-        if need_new_socket:
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.connect((ip, 22081))
+            self.recv_buffer = b""
+        except Exception as ex:
+            self.login_status.config(text=f"Cannot connect: {ex}", fg="#CC3333")
+            self._connecting = False
             self._cleanup_sockets()
+            return
 
-            try:
-                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.sock.connect((ip, 22081))
-                self.recv_buffer = b""
-            except Exception as ex:
-                self.login_status.config(text=f"Cannot connect: {ex}", fg="#CC3333")
-                self._connecting = False
-                self._cleanup_sockets()
-                return
+        try:
+            self.beep_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.beep_sock.bind(("", 0))
+            self._beep_port = self.beep_sock.getsockname()[1]
+        except Exception as ex:
+            self.login_status.config(text=f"UDP setup failed: {ex}", fg="#CC3333")
+            self._connecting = False
+            self._cleanup_sockets()
+            return
 
-            try:
-                self.beep_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                self.beep_sock.bind(("", 0))
-                self._beep_port = self.beep_sock.getsockname()[1]
-            except Exception as ex:
-                self.login_status.config(text=f"UDP setup failed: {ex}", fg="#CC3333")
-                self._connecting = False
-                self._cleanup_sockets()
-                return
-
-        ok, retryable = self._authenticate(user, pwd, mode)
-
+        ok = self._authenticate(user, pwd, mode)
         if ok:
             self.aliase = user
-            self._auth_failed_retryable = False
             self._load_histories()
             self.login_frame.destroy()
             self._build_main_ui()
@@ -391,9 +383,7 @@ class Chat77App(tk.Tk):
             threading.Thread(target=self._recv_loop, daemon=True).start()
             threading.Thread(target=self._beep_loop, daemon=True).start()
         else:
-            self._auth_failed_retryable = retryable
-            if not retryable:
-                self._cleanup_sockets()
+            self._cleanup_sockets()
 
         self._connecting = False
 
@@ -405,47 +395,41 @@ class Chat77App(tk.Tk):
                 msg = self._recv_line_sync()
                 if msg is None:
                     self.login_status.config(text="Connection lost during auth.", fg="#CC3333")
-                    return False, False
+                    return False
             except Exception:
                 self.login_status.config(text="Connection lost during auth.", fg="#CC3333")
-                return False, False
+                return False
 
             if msg.startswith("Authorise MODE"):
-                if not self._safe_send(current_mode):
-                    return False, False
+                self._safe_send(current_mode)
 
             elif msg == "ALIAS?":
-                if not self._safe_send(user):
-                    return False, False
+                self._safe_send(user)
 
             elif msg == "PASSWORD?":
-                if not self._safe_send(pwd):
-                    return False, False
-
-            elif msg.startswith("ERROR: Invalid alias or password"):
-                self.login_status.config(
-                    text="Invalid alias or password. Correct it and press Connect again.",
-                    fg="#CC3333"
-                )
-                return False, True
+                self._safe_send(pwd)
 
             elif msg.startswith("ERROR:"):
                 self.login_status.config(text=msg, fg="#CC3333")
-                return False, True
+                return False
 
             elif msg == "This alias is already logged in":
                 self.login_status.config(text=msg, fg="#CC3333")
-                return False, True
+                return False
 
             elif msg == "Registration successful. You can login now.":
                 self.login_status.config(text="Registered successfully. Logging in…", fg=FG_BLUE)
                 current_mode = "LOGIN"
 
             elif msg in ("AUTH_SUCCESS", "SUCCESSFULLY AUTHENTICATE"):
-                return True, False
+                return True
 
             else:
                 self.login_status.config(text=msg, fg=FG_SECONDARY)
+
+    def _initial_sync(self):
+        self._safe_send("my groups")
+        self._safe_send("my private chats")
 
     # ──────────────────────────────────────────────────────────────────────
     # MODE SELECTOR
@@ -749,13 +733,6 @@ class Chat77App(tk.Tk):
         self.msg_entry.bind("<Return>", self._send_message_event)
         self.msg_entry.bind("<Shift-Return>", self._insert_newline)
 
-        emoji_btn = tk.Label(input_inner, text="😊", font=("Segoe UI Emoji", 14),
-                    bg=BG_INPUT, fg=FG_SECONDARY, cursor="hand2", padx=6)
-        emoji_btn.pack(side="right")
-        emoji_btn.bind("<Button-1>", lambda e: self._show_emoji_picker())
-        emoji_btn.bind("<Enter>", lambda e: emoji_btn.config(fg=FG_PRIMARY))
-        emoji_btn.bind("<Leave>", lambda e: emoji_btn.config(fg=FG_SECONDARY))
-
         send_btn = tk.Label(input_inner, text="➤", font=("Segoe UI", 16),
                             bg=BG_INPUT, fg=FG_BLUE, cursor="hand2", padx=12)
         send_btn.pack(side="right")
@@ -923,70 +900,6 @@ class Chat77App(tk.Tk):
             self.chat_histories[key] = []
         self._refresh_chat_header(key)
         self._render_messages(key)
-    
-    # Emojis
-    def _insert_emoji(self, emoji):
-        try:
-            self.msg_entry.insert("insert", emoji)
-            self.msg_entry.focus_set()
-        except Exception:
-            pass
-
-    def _close_emoji_picker(self):
-        if self._emoji_popup and self._emoji_popup.winfo_exists():
-            self._emoji_popup.destroy()
-        self._emoji_popup = None
-
-    def _show_emoji_picker(self):
-        if self._emoji_popup and self._emoji_popup.winfo_exists():
-            self._close_emoji_picker()
-            return
-
-        self._emoji_popup = tk.Toplevel(self)
-        self._emoji_popup.title("Emojis")
-        self._emoji_popup.resizable(False, False)
-        self._emoji_popup.configure(bg=BG_CARD)
-        self._emoji_popup.transient(self)
-
-        emojis = [
-            "😀", "😂", "😍", "😎", "🥳", "😭", "🔥", "👍",
-            "👏", "🙏", "💯", "❤️", "💙", "💔", "😡", "🤔",
-            "🙌", "👌", "🎉", "📎", "✅", "❌", "👀", "😅"
-        ]
-
-        outer = tk.Frame(self._emoji_popup, bg=BG_CARD, padx=10, pady=10)
-        outer.pack()
-
-        cols = 6
-        for i, emo in enumerate(emojis):
-            btn = tk.Button(
-                outer,
-                text=emo,
-                font=("Segoe UI Emoji", 14),
-                width=3,
-                relief="flat",
-                bg=BG_SEARCH,
-                activebackground=BG_ITEM_HVR,
-                command=lambda e=emo: self._insert_emoji(e)
-            )
-            btn.grid(row=i // cols, column=i % cols, padx=4, pady=4)
-
-        close_btn = tk.Button(
-            outer,
-            text="Close",
-            font=FONT_SMALL,
-            relief="flat",
-            bg=FG_BLUE,
-            fg="white",
-            activebackground=_lighten(FG_BLUE),
-            command=self._close_emoji_picker
-        )
-        close_btn.grid(row=(len(emojis) + cols - 1) // cols + 1, column=0, columnspan=cols, pady=(8, 0), sticky="ew")
-
-        self._emoji_popup.update_idletasks()
-        x = self.winfo_x() + self.winfo_width() - self._emoji_popup.winfo_width() - 40
-        y = self.winfo_y() + self.winfo_height() - self._emoji_popup.winfo_height() - 110
-        self._emoji_popup.geometry(f"+{x}+{y}")
 
     # ──────────────────────────────────────────────────────────────────────
     # CHAT HEADER / MESSAGES
@@ -1590,7 +1503,6 @@ class Chat77App(tk.Tk):
             self._safe_send("exit")
         except Exception:
             pass
-        self._close_emoji_picker()
         self._on_close()
 
     # ──────────────────────────────────────────────────────────────────────
