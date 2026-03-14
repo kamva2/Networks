@@ -6,9 +6,11 @@ import uuid
 
 server_ip = input("Enter server IP address: ").strip()
 
+
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client.connect((server_ip, 22081))
 
+# UDP socket for receiving beep notifications
 beep_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 beep_socket.bind(("", 0))
 beep_port = beep_socket.getsockname()[1]
@@ -22,7 +24,7 @@ incoming_transfers = {}
 client_buffer = b""
 running = True
 
-
+# Function to send a text message to the server, ensuring it ends with a newline character and handling any exceptions that may occur during sending
 def send_packet(text):
     try:
         client.sendall((text + "\n").encode())
@@ -30,7 +32,7 @@ def send_packet(text):
     except:
         return False
 
-
+# Function to receive a line of text from the server, handling buffering and partial messages. It returns the line as a decoded string without the trailing newline character, or None if the connection is closed.
 def recv_line():
     global client_buffer
     while True:
@@ -68,7 +70,7 @@ def beep_receive():
         except:
             break
 
-
+# Load the client connection database from JSON file, returning a dictionary with "users" and "connections" keys. If the file does not exist or is invalid, it returns an empty database structure.
 def safe_filename(name):
     return os.path.basename(name)
 
@@ -78,7 +80,8 @@ def ensure_download_dir():
     os.makedirs(download_dir, exist_ok=True)
     return download_dir
 
-
+# This function finalizes an incoming file transfer by checking if all chunks have been received, reconstructing the file from the chunks, and saving it to the downloads directory. 
+# If any chunks are missing, it discards the transfer and prints a message indicating that the file is incomplete.
 def finalize_incoming_transfer(sender, transfer_id, total_chunks):
     transfer = incoming_transfers.get(transfer_id)
     if transfer is None:
@@ -110,7 +113,7 @@ def finalize_incoming_transfer(sender, transfer_id, total_chunks):
 
     incoming_transfers.pop(transfer_id, None)
 
-
+# This function sends a file to a target client over TCP by first sending a FILE_START packet with the file metadata, then sending the file in base64-encoded chunks, and finally sending a FILE_END packet to indicate completion. It handles errors such as file not found, read failures, and send failures, printing appropriate messages for each case.
 def send_file_via_tcp(target, file_path):
     if not os.path.isfile(file_path):
         print(f"File not found: {file_path}")
@@ -148,7 +151,7 @@ def send_file_via_tcp(target, file_path):
     except Exception as ex:
         print(f"Failed to send file over TCP: {ex}")
 
-
+# This function handles the authentication process for the client, including registration and login.
 def authenticate():
     global aliase
 
@@ -214,7 +217,8 @@ def authenticate():
         else:
             print(message)
 
-
+# The following functions interact with the client connection database to register new users, authenticate existing users, check if a user exists, and record login/logout events with timestamps.
+# They handle the necessary data transformations and ensure that the database is updated accordingly.
 def client_receive():
     global private_partners, pending_requesters, groups, pending_group_invites, running
 
@@ -337,7 +341,7 @@ def client_receive():
                 pass
             break
 
-
+# Load the client connection database from JSON file, returning a dictionary with "users" and "connections" keys. If the file does not exist or is invalid, it returns an empty database structure.
 def client_send():
     global private_partners, groups, running
 
@@ -506,12 +510,15 @@ def client_send():
 if authenticate():
     register_beep_port()
 
+    # Start the threads for receiving beeps and messages from the server, and for sending user input to the server. 
     beep_thread = threading.Thread(target=beep_receive, daemon=True)
     beep_thread.start()
 
     receive_thread = threading.Thread(target=client_receive, daemon=True)
     receive_thread.start()
 
+    # The main thread will handle user input and sending messages to the server, while the other threads will handle receiving messages and beeps. 
+    # The program will continue running until the user types "exit" or the connection is closed.
     send_thread = threading.Thread(target=client_send)
     send_thread.start()
     send_thread.join()

@@ -5,13 +5,16 @@ import database
 host = '0.0.0.0'
 port = 22081
 
+# Create TCP server socket
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind((host, port))
 server.listen()
 
+# Create UDP socket for beeps
 beep_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+# Data structures to manage clients, aliases, pending requests, private connections, groups, and offline messages
 clients = []
 aliases = []
 pending_requests = {}
@@ -24,7 +27,7 @@ beep_endpoints = {}
 
 client_buffers = {}
 
-
+# Function to send a packet to a client
 def send_packet(sock, text):
     try:
         sock.sendall((text + "\n").encode())
@@ -32,35 +35,35 @@ def send_packet(sock, text):
     except:
         return False
 
-
+# Function to broadcast a message to all clients except the sender
 def broadcast(message, sender=None):
     for client in clients[:]:
         if client != sender:
             send_packet(client, message)
 
-
+# Function to get client socket by alias
 def get_client_by_alias(aliase):
     if aliase not in aliases:
         return None
     index = aliases.index(aliase)
     return clients[index]
 
-
+# Function to send a message to a client by alias
 def send_to_alias(aliase, message):
     target_client = get_client_by_alias(aliase)
     if target_client is None:
         return False
     return send_packet(target_client, message)
 
-
+# Functions to manage beep endpoints for clients
 def register_beep_endpoint(aliase, ip_address, udp_port):
     beep_endpoints[aliase] = (ip_address, udp_port)
 
-
+# Function to remove beep endpoint for a client
 def remove_beep_endpoint(aliase):
     beep_endpoints.pop(aliase, None)
 
-
+# Function to send a beep notification to a client
 def send_beep(to_alias, from_alias, channel):
     endpoint = beep_endpoints.get(to_alias)
     if endpoint is None:
@@ -70,21 +73,21 @@ def send_beep(to_alias, from_alias, channel):
     except:
         pass
 
-
+#
 def resolve_alias(raw_alias):
     for online_alias in aliases:
         if online_alias.lower() == raw_alias.lower():
             return online_alias
     return None
 
-
+# Function to resolve group name case-insensitively
 def resolve_group_name(raw_group_name):
     for group_name in groups:
-        if group_name.lower() == raw_group_name.lower():
+        if group_name.lower() == raw_group_name.lower(): 
             return group_name
     return None
 
-
+# Function to resolve registered alais case-insensitively
 def resolve_registered_alias(raw_alias):
     db = database.load_database()
     for user in db.get("users", []):
@@ -93,13 +96,13 @@ def resolve_registered_alias(raw_alias):
             return username
     return None
 
-
+# Function to queue an offline message for a target aliase
 def queue_offline_message(target_alias, message):
     if target_alias not in offline_inbox:
         offline_inbox[target_alias] = []
     offline_inbox[target_alias].append(message)
 
-
+# Function to deliver pending requests, group invites, and queued messages for an aliase when they come online
 def deliver_offline_for_alias(aliase):
     for requester in sorted(pending_requests.get(aliase, set())):
         send_to_alias(aliase, f"PRIVATE_REQUEST_FROM:{requester}")
@@ -113,19 +116,19 @@ def deliver_offline_for_alias(aliase):
     for msg in queued:
         send_to_alias(aliase, msg)
 
-
+# Function to ensure a private partner set exists for an alias
 def ensure_private_partner_set(aliase):
     if aliase not in private_partners:
         private_partners[aliase] = set()
 
-
+# Function to add a private connection between two aliases
 def add_private_connection(aliase_a, aliase_b):
     ensure_private_partner_set(aliase_a)
     ensure_private_partner_set(aliase_b)
     private_partners[aliase_a].add(aliase_b)
     private_partners[aliase_b].add(aliase_a)
 
-
+# Function to remove a private connection between two aliases and notify them of the reason
 def remove_private_connection(aliase_a, aliase_b, reason):
     if aliase_a in private_partners:
         private_partners[aliase_a].discard(aliase_b)
@@ -140,13 +143,13 @@ def remove_private_connection(aliase_a, aliase_b, reason):
     send_to_alias(aliase_a, f"PRIVATE_ENDED:{aliase_b}:{reason}")
     send_to_alias(aliase_b, f"PRIVATE_ENDED:{aliase_a}:{reason}")
 
-
+# Function to end all private connections for an alias when they disconnect
 def end_private_connection(aliase):
     partners = list(private_partners.get(aliase, set()))
     for partner in partners:
         remove_private_connection(aliase, partner, "disconnected")
 
-
+# Function to clean up pending connection requests for an alias when they disconnect
 def cleanup_pending_requests(aliase):
     targets_to_remove = []
     for target, requesters in pending_requests.items():
@@ -157,11 +160,11 @@ def cleanup_pending_requests(aliase):
     for target in targets_to_remove:
         pending_requests.pop(target, None)
 
-
+# Function to clean up group invites for an alias when they disconnect
 def cleanup_group_invites(aliase):
     group_invites.pop(aliase, None)
 
-
+# Function to clean up group memberships and ownerships for an alias when they disconnect
 def cleanup_groups_for_alias(aliase):
     removed_groups = []
     for group_name, members in list(groups.items()):
@@ -190,7 +193,7 @@ def cleanup_groups_for_alias(aliase):
         if not invited_groups:
             group_invites.pop(invitee, None)
 
-
+# Function to remove a client and clean up associated resources
 def remove_client(client):
     if client not in clients:
         return
@@ -215,7 +218,7 @@ def remove_client(client):
     broadcast(f"{aliase} has left the chatroom")
     database.record_logout(aliase)
 
-
+# Handlers for group commands and private messaging
 def handle_create_group(aliase, text):
     group_name = text[len('create group '):].strip()
     if not group_name:
@@ -229,7 +232,7 @@ def handle_create_group(aliase, text):
     group_owners[group_name] = aliase
     return f"GROUP_JOINED:{group_name}"
 
-
+# Handler for inviting a client to a group
 def handle_invite_group(aliase, text):
     payload = text[len('invite group '):].strip()
     parts = payload.split(maxsplit=1)
@@ -266,7 +269,7 @@ def handle_invite_group(aliase, text):
 
     return f"INFO: {target} is offline. Group invite queued for delivery."
 
-
+# Handler for accepting a group invite
 def handle_accept_group(aliase, text):
     group_raw = text[len('accept group '):].strip()
     if not group_raw:
@@ -289,7 +292,7 @@ def handle_accept_group(aliase, text):
             send_to_alias(member, f"INFO: {aliase} joined group {group_name}")
     return f"GROUP_JOINED:{group_name}"
 
-
+# Handler for rejecting a group invite
 def handle_reject_group(aliase, text):
     group_raw = text[len('reject group '):].strip()
     if not group_raw:
@@ -311,14 +314,14 @@ def handle_reject_group(aliase, text):
         send_to_alias(owner, f"INFO: {aliase} rejected invite to group {group_name}")
     return f"INFO: Rejected invite to group {group_name}"
 
-
+# Handler for listing groups the client is a member of
 def handle_my_groups(aliase):
     mine = sorted([group_name for group_name, members in groups.items() if aliase in members])
     if not mine:
         return "Groups: none"
     return f"Groups: {', '.join(mine)}"
 
-
+# Handler for sending a message to a group
 def handle_group_message(aliase, raw_text):
     payload = raw_text[len('group txt '):].strip()
     parts = payload.split(maxsplit=1)
@@ -346,7 +349,7 @@ def handle_group_message(aliase, raw_text):
                 queue_offline_message(member, message)
     return ""
 
-
+# function to check if a file can be relayed between sender and target aliases
 def can_relay_file(sender_alias, target_alias):
     if target_alias is None:
         return False, "INFO: Target alias is not online"
@@ -354,7 +357,7 @@ def can_relay_file(sender_alias, target_alias):
         return False, "INFO: No private connection with target"
     return True, ""
 
-
+# Handlers for file transfer commands
 def handle_file_start(sender_alias, raw_text):
     parts = raw_text.split("|", 4)
     if len(parts) != 5:
@@ -370,7 +373,7 @@ def handle_file_start(sender_alias, raw_text):
     send_beep(target_alias, sender_alias, "FILE")
     return ""
 
-
+# Handler for relaying a file chunk from sender to target
 def handle_file_chunk(sender_alias, raw_text):
     parts = raw_text.split("|", 4)
     if len(parts) != 5:
@@ -385,7 +388,7 @@ def handle_file_chunk(sender_alias, raw_text):
     send_to_alias(target_alias, f"FILE_CHUNK_FROM|{sender_alias}|{transfer_id}|{seq_str}|{chunk_b64}")
     return ""
 
-
+# Handler for relaying file transfer completion from sender to target
 def handle_file_end(sender_alias, raw_text):
     parts = raw_text.split("|", 3)
     if len(parts) != 4:
@@ -400,7 +403,7 @@ def handle_file_end(sender_alias, raw_text):
     send_to_alias(target_alias, f"FILE_END_FROM|{sender_alias}|{transfer_id}|{total_chunks}")
     return ""
 
-
+# Handler for initiating a private connection request to another client
 def handle_connect_request(aliase, text):
     requested_alias = text[len('connect to '):].strip()
 
@@ -431,7 +434,7 @@ def handle_connect_request(aliase, text):
 
     return f"INFO: {resolved_target} is offline. Invitation queued for delivery."
 
-
+# Handler for accepting a private connection request from another client
 def handle_accept_request(aliase, text):
     requester_raw = text[len('accept connection '):].strip()
     if not requester_raw:
@@ -452,7 +455,7 @@ def handle_accept_request(aliase, text):
     send_to_alias(requester, f"PRIVATE_CONNECTED:{aliase}")
     return f"PRIVATE_CONNECTED:{requester}"
 
-
+# Handler for rejecting a private connection request from another client
 def handle_reject_request(aliase, text):
     requester_raw = text[len('reject connection '):].strip()
     if not requester_raw:
@@ -472,7 +475,7 @@ def handle_reject_request(aliase, text):
     send_to_alias(requester, f"PRIVATE_REJECTED:{aliase}")
     return f"INFO: Rejected private request from {requester}"
 
-
+# Handler for ending an existing private connection with another client
 def handle_end_private_request(aliase, text):
     target_raw = text[len('end private '):].strip()
     if not target_raw:
@@ -488,7 +491,7 @@ def handle_end_private_request(aliase, text):
     remove_private_connection(aliase, target, "ended by command")
     return f"INFO: Private connection with {target} ended"
 
-
+# Handler for sending a private message to a connected client or queuing it if the target is offline
 def handle_private_message(aliase, raw_text):
     payload = raw_text[12:].strip()
     if not payload:
@@ -517,7 +520,7 @@ def handle_private_message(aliase, raw_text):
     queue_offline_message(offline_target, f"[Offline Private] {aliase}: {private_text}")
     return f"INFO: {offline_target} is offline. Message queued for delivery."
 
-
+# Function to receive a line of text from a client, handling buffering and partial messages
 def recv_line(client):
     while True:
         if client not in client_buffers:
@@ -533,7 +536,7 @@ def recv_line(client):
             return None
         client_buffers[client] += chunk
 
-
+# Function to authenticate a client by prompting for registration or login and validating credentials
 def authenticate_client(client):
     while True:
         send_packet(client, "Authorise MODE? (REGISTER/LOGIN)")
@@ -581,7 +584,7 @@ def authenticate_client(client):
         send_packet(client, "AUTH_SUCCESS")
         return aliase
 
-
+# Main handler function for client communication, processing incoming messages and commands
 def handle_client(client, aliase, address):
     while True:
         try:
@@ -692,7 +695,7 @@ def handle_client(client, aliase, address):
             remove_client(client)
             break
 
-
+# Function to receive incoming client connections and handle authentication and communication
 def receive():
     while True:
         print("Server is running and listening...")
@@ -715,12 +718,15 @@ def receive():
 
         ip_address = address[0]
         port_num = address[1]
+        
+        # Record the login details in the database
         database.record_login(aliase, ip_address, port_num)
 
         broadcast(f"{aliase} has connected to the chatroom")
         send_packet(client, "you are now connected")
         deliver_offline_for_alias(aliase)
 
+        # Start a new thread to handle communication with the client
         thread = threading.Thread(target=handle_client, args=(client, aliase, address), daemon=True)
         thread.start()
 
