@@ -1,14 +1,15 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, filedialog, simpledialog
 import threading
 import socket
 import os
 import base64
 import uuid
 import time
+import json
 
 
-#Colour palette
+# ─── Colour palette ────────────────────────────────────────────────────────────
 BG_MAIN      = "#F2F6FA"
 BG_SIDEBAR   = "#F2F6FA"
 BG_CHAT      = "#FAFBFC"
@@ -38,6 +39,8 @@ FONT_HEADER  = ("Segoe UI", 11, "bold")
 FONT_TITLE   = ("Segoe UI", 13, "bold")
 FONT_BIG     = ("Segoe UI", 15, "bold")
 
+HISTORY_DIR = "chat_histories"
+
 
 def _lighten(hex_color, factor=1.18):
     import colorsys
@@ -62,8 +65,8 @@ class RoundedButton(tk.Frame):
         self._lbl.place(relx=0.5, rely=0.5, anchor="center")
         for w in (self, self._lbl):
             w.bind("<Button-1>", lambda e: self._command())
-            w.bind("<Enter>",    lambda e: self._hover(True))
-            w.bind("<Leave>",    lambda e: self._hover(False))
+            w.bind("<Enter>", lambda e: self._hover(True))
+            w.bind("<Leave>", lambda e: self._hover(False))
 
     def _hover(self, on):
         c = self._hover_bg if on else self._bg
@@ -107,7 +110,7 @@ class StyledPanel(tk.Toplevel):
         tk.Label(self.card, text=title, font=FONT_TITLE,
                  bg=BG_CARD, fg=FG_PRIMARY).pack(anchor="w", pady=(0, 14))
         self.update_idletasks()
-        px = parent.winfo_x() + (parent.winfo_width()  - self.winfo_width())  // 2
+        px = parent.winfo_x() + (parent.winfo_width() - self.winfo_width()) // 2
         py = parent.winfo_y() + (parent.winfo_height() - self.winfo_height()) // 2
         self.geometry(f"+{px}+{py}")
 
@@ -144,7 +147,65 @@ class Chat77App(tk.Tk):
 
         self._build_login_screen()
 
+    # ──────────────────────────────────────────────────────────────────────
+    # HISTORY STORAGE
+    # ──────────────────────────────────────────────────────────────────────
+    def _history_path(self):
+        safe_user = self.aliase.strip().replace("/", "_").replace("\\", "_")
+        os.makedirs(HISTORY_DIR, exist_ok=True)
+        return os.path.join(HISTORY_DIR, f"{safe_user}.json")
+
+    def _load_histories(self):
+        self.chat_histories = {}
+        if not self.aliase:
+            return
+        path = self._history_path()
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                for key, messages in data.items():
+                    if isinstance(messages, list):
+                        cleaned = []
+                        for m in messages:
+                            if isinstance(m, dict):
+                                cleaned.append({
+                                    "sender": str(m.get("sender", "")),
+                                    "text": str(m.get("text", "")),
+                                    "timestamp": str(m.get("timestamp", "")),
+                                    "is_me": bool(m.get("is_me", False)),
+                                })
+                        self.chat_histories[key] = cleaned
+        except Exception:
+            self.chat_histories = {}
+
+    def _save_histories(self):
+        if not self.aliase:
+            return
+        try:
+            with open(self._history_path(), "w", encoding="utf-8") as f:
+                json.dump(self.chat_histories, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _ensure_sidebar_from_history(self):
+        for key in sorted(self.chat_histories.keys()):
+            if key == "broadcast":
+                self._add_sidebar_item("broadcast", "Broadcast", "Everyone online")
+            elif key.startswith("private:"):
+                partner = key[8:]
+                self.private_partners.add(partner)
+                self._add_sidebar_item(key, partner, "Private chat")
+            elif key.startswith("group:"):
+                group = key[6:]
+                self.groups.add(group)
+                self._add_sidebar_item(key, group, "Group chat")
+
+    # ──────────────────────────────────────────────────────────────────────
     # SOCKET HELPERS
+    # ──────────────────────────────────────────────────────────────────────
     def _cleanup_sockets(self):
         try:
             if self.sock:
@@ -190,13 +251,19 @@ class Chat77App(tk.Tk):
 
     def _on_close(self):
         try:
+            self._save_histories()
+        except Exception:
+            pass
+        try:
             self._safe_send("exit")
         except Exception:
             pass
         self._cleanup_sockets()
         self.destroy()
 
+    # ──────────────────────────────────────────────────────────────────────
     # LOGIN SCREEN
+    # ──────────────────────────────────────────────────────────────────────
     def _build_login_screen(self):
         self.login_frame = tk.Frame(self, bg="#E8F0FA")
         self.login_frame.pack(fill="both", expand=True)
@@ -308,6 +375,7 @@ class Chat77App(tk.Tk):
         ok = self._authenticate(user, pwd, mode)
         if ok:
             self.aliase = user
+            self._load_histories()
             self.login_frame.destroy()
             self._build_main_ui()
             self._register_beep_port()
@@ -363,7 +431,9 @@ class Chat77App(tk.Tk):
         self._safe_send("my groups")
         self._safe_send("my private chats")
 
+    # ──────────────────────────────────────────────────────────────────────
     # MODE SELECTOR
+    # ──────────────────────────────────────────────────────────────────────
     def _build_main_ui(self):
         self._show_mode_selector()
 
@@ -399,8 +469,8 @@ class Chat77App(tk.Tk):
 
         modes = [
             ("Private\nText",  ACCENT_PRIVATE,   "💬", "Direct messages\nbetween two users",  self._open_private_ui),
-            ("Group\nChat",    ACCENT_GROUP,      "👥", "Conversations with\nmultiple members", self._open_group_ui),
-            ("Broadcast",      ACCENT_BROADCAST,  "🌐", "Send to everyone\ncurrently online",   self._open_broadcast_ui),
+            ("Group\nChat",    ACCENT_GROUP,     "👥", "Conversations with\nmultiple members", self._open_group_ui),
+            ("Broadcast",      ACCENT_BROADCAST, "🌐", "Send to everyone\ncurrently online",   self._open_broadcast_ui),
         ]
 
         for col, (title, accent, icon, desc, cmd) in enumerate(modes):
@@ -443,18 +513,22 @@ class Chat77App(tk.Tk):
     def _open_private_ui(self):
         self._destroy_mode_frame()
         self._build_split_ui(mode="private")
+        self._ensure_sidebar_from_history()
         for p in self.private_partners:
             self._add_sidebar_item(f"private:{p}", p, "Private chat")
         if self.private_partners:
-            self._select_chat(f"private:{next(iter(self.private_partners))}")
+            self._select_chat(f"private:{sorted(self.private_partners)[0]}")
+        elif "broadcast" in self.chat_histories:
+            pass
 
     def _open_group_ui(self):
         self._destroy_mode_frame()
         self._build_split_ui(mode="group")
+        self._ensure_sidebar_from_history()
         for g in self.groups:
             self._add_sidebar_item(f"group:{g}", g, "Group chat")
         if self.groups:
-            self._select_chat(f"group:{next(iter(self.groups))}")
+            self._select_chat(f"group:{sorted(self.groups)[0]}")
 
     def _open_broadcast_ui(self):
         self._destroy_mode_frame()
@@ -477,7 +551,9 @@ class Chat77App(tk.Tk):
         self.unread_counts = {}
         self._show_mode_selector()
 
+    # ──────────────────────────────────────────────────────────────────────
     # SPLIT UI
+    # ──────────────────────────────────────────────────────────────────────
     def _build_split_ui(self, mode="broadcast"):
         self._current_mode = mode
         self.sidebar_items = {}
@@ -486,14 +562,16 @@ class Chat77App(tk.Tk):
         self.unread_counts = {}
 
         self.main_pane = tk.PanedWindow(self, orient="horizontal",
-                                         sashrelief="flat", sashwidth=1, bg="#D0DCE8")
+                                        sashrelief="flat", sashwidth=1, bg="#D0DCE8")
         self.main_pane.pack(fill="both", expand=True)
         self._build_sidebar(mode=mode)
         self._build_chat_area(mode=mode)
         self.main_pane.add(self.sidebar, minsize=280)
         self.main_pane.add(self.chat_container, minsize=420)
 
+    # ──────────────────────────────────────────────────────────────────────
     # SIDEBAR
+    # ──────────────────────────────────────────────────────────────────────
     def _build_sidebar(self, mode="broadcast"):
         accent = {"private": ACCENT_PRIVATE,
                   "group": ACCENT_GROUP,
@@ -511,8 +589,8 @@ class Chat77App(tk.Tk):
                         bg=BG_HEADER, fg="#A8C8E8", cursor="hand2")
         back.place(relx=1.0, x=-14, y=20, anchor="ne")
         back.bind("<Button-1>", lambda e: self._go_back_to_selector())
-        back.bind("<Enter>",    lambda e: back.config(fg="#FFFFFF"))
-        back.bind("<Leave>",    lambda e: back.config(fg="#A8C8E8"))
+        back.bind("<Enter>", lambda e: back.config(fg="#FFFFFF"))
+        back.bind("<Leave>", lambda e: back.config(fg="#A8C8E8"))
 
         tk.Frame(self.sidebar, bg=accent, height=3).pack(fill="x")
 
@@ -585,7 +663,9 @@ class Chat77App(tk.Tk):
             w.bind("<Leave>", _l)
             w.bind("<Button-1>", _c)
 
+    # ──────────────────────────────────────────────────────────────────────
     # CHAT AREA
+    # ──────────────────────────────────────────────────────────────────────
     def _build_chat_area(self, mode="broadcast"):
         accent = {"private": ACCENT_PRIVATE,
                   "group": ACCENT_GROUP,
@@ -616,9 +696,15 @@ class Chat77App(tk.Tk):
         hbtn_wrap.place(relx=1.0, x=-14, y=12, anchor="ne")
 
         btns = []
-        if mode == "group":
+        if mode == "private":
+            btns.append(("📎  File", "File", self._prompt_send_file))
+            btns.append(("🚫  End", "End Chat", self._end_current_chat))
+        elif mode == "group":
+            btns.append(("📎  File", "File", self._prompt_send_file))
             btns.append(("👥  Invite", "Invite Member", self._prompt_invite_group))
-        btns.append(("🚫  End", "End Chat", self._end_current_chat))
+            btns.append(("🚫  End", "End Chat", self._end_current_chat))
+        else:
+            btns.append(("🚫  End", "End Chat", self._end_current_chat))
 
         for txt, tip, cmd in btns:
             b = tk.Label(hbtn_wrap, text=txt, font=("Segoe UI", 9),
@@ -654,15 +740,9 @@ class Chat77App(tk.Tk):
         send_btn.bind("<Enter>", lambda e: send_btn.config(fg=FG_PRIMARY))
         send_btn.bind("<Leave>", lambda e: send_btn.config(fg=FG_BLUE))
 
-        if mode == "private":
-            file_btn = tk.Label(input_inner, text="📎", font=("Segoe UI", 15),
-                                bg=BG_INPUT, fg=FG_SECONDARY, cursor="hand2", padx=6)
-            file_btn.pack(side="right")
-            file_btn.bind("<Button-1>", lambda e: self._prompt_send_file())
-            file_btn.bind("<Enter>", lambda e: file_btn.config(fg=FG_PRIMARY))
-            file_btn.bind("<Leave>", lambda e: file_btn.config(fg=FG_SECONDARY))
-
+    # ──────────────────────────────────────────────────────────────────────
     # SIDEBAR ITEMS + UNREAD
+    # ──────────────────────────────────────────────────────────────────────
     def _add_sidebar_item(self, key, label, subtitle="", notify=False):
         if key in self.sidebar_items:
             self.sidebar_meta[key]["label"] = label.lower()
@@ -793,9 +873,6 @@ class Chat77App(tk.Tk):
             else:
                 frame.pack_forget()
 
-    def _set_notification(self, key):
-        self._mark_unread(key)
-
     def _select_chat(self, key):
         if self.current_chat and self.current_chat in self.sidebar_items:
             old_m = self.sidebar_meta.get(self.current_chat, {})
@@ -824,7 +901,9 @@ class Chat77App(tk.Tk):
         self._refresh_chat_header(key)
         self._render_messages(key)
 
+    # ──────────────────────────────────────────────────────────────────────
     # CHAT HEADER / MESSAGES
+    # ──────────────────────────────────────────────────────────────────────
     def _refresh_chat_header(self, key):
         if key == "broadcast":
             name = "Broadcast"
@@ -904,6 +983,7 @@ class Chat77App(tk.Tk):
             self.chat_histories[key] = []
         msg = {"sender": sender, "text": text, "timestamp": ts, "is_me": is_me}
         self.chat_histories[key].append(msg)
+        self._save_histories()
         if self.current_chat == key:
             self._add_bubble(msg)
         else:
@@ -913,7 +993,9 @@ class Chat77App(tk.Tk):
         key = key or self.current_chat or "broadcast"
         self._push_message(key, "", f"ℹ  {text}", False)
 
+    # ──────────────────────────────────────────────────────────────────────
     # SEND
+    # ──────────────────────────────────────────────────────────────────────
     def _insert_newline(self, event=None):
         self.msg_entry.insert("insert", "\n")
         return "break"
@@ -946,7 +1028,9 @@ class Chat77App(tk.Tk):
         except Exception as ex:
             self._system_msg(f"Send error: {ex}")
 
+    # ──────────────────────────────────────────────────────────────────────
     # STYLED PANELS
+    # ──────────────────────────────────────────────────────────────────────
     def _show_connect_panel(self):
         panel = StyledPanel(self, "Connect to User", ACCENT_PRIVATE)
         panel.geometry("360x210")
@@ -982,11 +1066,9 @@ class Chat77App(tk.Tk):
 
         container = tk.Frame(panel.card, bg=BG_CARD)
         container.pack(fill="both", expand=True)
-        self._online_panel_ref = panel
 
-        loading = tk.Label(container, text="Fetching online users…",
-                           font=FONT_BODY, bg=BG_CARD, fg=FG_SECONDARY)
-        loading.pack(pady=20)
+        tk.Label(container, text="Fetching online users…",
+                 font=FONT_BODY, bg=BG_CARD, fg=FG_SECONDARY).pack(pady=20)
 
         def populate(users):
             for w in container.winfo_children():
@@ -1085,7 +1167,9 @@ class Chat77App(tk.Tk):
                 w.bind("<Leave>", lambda e, r=row, n=nm, o=ol:
                        (r.config(bg=BG_CARD), n.config(bg=BG_CARD), o.config(bg=BG_CARD)))
 
+    # ──────────────────────────────────────────────────────────────────────
     # RECEIVE LOOP
+    # ──────────────────────────────────────────────────────────────────────
     def _recv_loop(self):
         try:
             while True:
@@ -1267,7 +1351,9 @@ class Chat77App(tk.Tk):
 
         self._system_msg(msg)
 
+    # ──────────────────────────────────────────────────────────────────────
     # BEEP LOOP
+    # ──────────────────────────────────────────────────────────────────────
     def _beep_loop(self):
         while True:
             try:
@@ -1290,7 +1376,9 @@ class Chat77App(tk.Tk):
     def _register_beep_port(self):
         self._safe_send(f"BEEP_UDP_PORT:{self._beep_port}")
 
+    # ──────────────────────────────────────────────────────────────────────
     # FILE TRANSFER
+    # ──────────────────────────────────────────────────────────────────────
     def _finalize_transfer(self, sender, transfer_id, total_chunks):
         transfer = self.incoming_transfers.get(transfer_id)
         if not transfer:
@@ -1334,16 +1422,27 @@ class Chat77App(tk.Tk):
 
         threading.Thread(target=_do, daemon=True).start()
 
+    # ──────────────────────────────────────────────────────────────────────
     # PROMPTS / ACTIONS
+    # ──────────────────────────────────────────────────────────────────────
     def _prompt_send_file(self):
         key = self.current_chat
-        if not key or not key.startswith("private:"):
-            self._show_styled_popup("Files are only supported in private chats by the current server.", [])
+        if not key:
+            self._show_styled_popup("Open a chat first.", [])
             return
-        target = key[8:]
-        path = filedialog.askopenfilename(parent=self, title="Choose a file")
-        if path:
-            self._send_file_to(target, path)
+
+        if key.startswith("private:"):
+            target = key[8:]
+            path = filedialog.askopenfilename(parent=self, title="Choose a file")
+            if path:
+                self._send_file_to(target, path)
+            return
+
+        if key.startswith("group:"):
+            self._show_styled_popup("The current server only supports file transfer in private chats.", [])
+            return
+
+        self._show_styled_popup("Files are not supported in broadcast chat.", [])
 
     def _prompt_invite_group(self):
         if not self.current_chat or not self.current_chat.startswith("group:"):
@@ -1392,15 +1491,23 @@ class Chat77App(tk.Tk):
             self._safe_send(f"end private {key[8:]}")
         elif key.startswith("group:"):
             self._show_styled_popup("Group leaving is not yet supported by the server.", [])
+        elif key == "broadcast":
+            self._show_styled_popup("Broadcast chat cannot be ended.", [])
 
     def _logout(self):
+        try:
+            self._save_histories()
+        except Exception:
+            pass
         try:
             self._safe_send("exit")
         except Exception:
             pass
         self._on_close()
 
+    # ──────────────────────────────────────────────────────────────────────
     # STYLED POPUP
+    # ──────────────────────────────────────────────────────────────────────
     def _show_styled_popup(self, message, buttons):
         popup = tk.Toplevel(self)
         popup.configure(bg=BG_MAIN)
@@ -1427,7 +1534,7 @@ class Chat77App(tk.Tk):
             RoundedButton(card, "OK", popup.destroy,
                           bg=ACCENT_GROUP, width=80, height=32).pack(anchor="w")
         popup.update_idletasks()
-        px = self.winfo_x() + (self.winfo_width()  - popup.winfo_width())  // 2
+        px = self.winfo_x() + (self.winfo_width() - popup.winfo_width()) // 2
         py = self.winfo_y() + (self.winfo_height() - popup.winfo_height()) // 2
         popup.geometry(f"+{px}+{py}")
         popup.after(18000, lambda: popup.destroy() if popup.winfo_exists() else None)
