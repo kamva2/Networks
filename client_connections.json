@@ -1,4 +1,19 @@
 {
-    "users": [],
-    "connections": []
+    "users": [
+        {
+            "aliase": "kamva",
+            "username": "kamva",
+            "password": "kamva1",
+            "created_at": "2026-03-14 02:59:13"
+        }
+    ],
+    "connections": [
+        {
+            "aliase": "kamva",
+            "ip_address": "127.0.0.1",
+            "port": 54385,
+            "login_time": "2026-03-14 02:59:30",
+            "logout_time": "2026-03-14 03:01:36"
+        }
+    ]
 }

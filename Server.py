@@ -3,7 +3,7 @@ import threading
 import database
 
 host = '0.0.0.0'
-port = 22081
+port = 55555
 
 # Create TCP server socket
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
