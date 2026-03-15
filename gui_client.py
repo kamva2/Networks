@@ -80,20 +80,71 @@ class ScrollableFrame(tk.Frame):
         self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0, bd=0, yscrollincrement=1)
         self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         self.inner = tk.Frame(self.canvas, bg=bg)
+
         self.inner.bind("<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+                        lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+
         self.window_id = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
+
         self.canvas.bind("<Configure>",
-            lambda e: self.canvas.itemconfig(self.window_id, width=e.width))
-        self.canvas.bind_all("<MouseWheel>",
-            lambda e: self.canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+                         lambda e: self.canvas.itemconfig(self.window_id, width=e.width))
+
+        # Safe mouse wheel handling: bind only while pointer is over the widget.
+        for w in (self.canvas, self.inner):
+            w.bind("<Enter>", self._bind_mousewheel)
+            w.bind("<Leave>", self._unbind_mousewheel)
+
+        self.bind("<Destroy>", self._on_destroy)
+
+    def _bind_mousewheel(self, event=None):
+        try:
+            self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+            self.canvas.bind_all("<Button-4>", self._on_mousewheel_linux)
+            self.canvas.bind_all("<Button-5>", self._on_mousewheel_linux)
+        except Exception:
+            pass
+
+    def _unbind_mousewheel(self, event=None):
+        try:
+            self.canvas.unbind_all("<MouseWheel>")
+            self.canvas.unbind_all("<Button-4>")
+            self.canvas.unbind_all("<Button-5>")
+        except Exception:
+            pass
+
+    def _on_destroy(self, event=None):
+        self._unbind_mousewheel()
+
+    def _on_mousewheel(self, event):
+        try:
+            if self.canvas.winfo_exists():
+                delta = event.delta // 120
+                if delta != 0:
+                    self.canvas.yview_scroll(-1 * delta, "units")
+        except tk.TclError:
+            pass
+
+    def _on_mousewheel_linux(self, event):
+        try:
+            if not self.canvas.winfo_exists():
+                return
+            if event.num == 4:
+                self.canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self.canvas.yview_scroll(1, "units")
+        except tk.TclError:
+            pass
 
     def scroll_to_bottom(self):
-        self.canvas.update_idletasks()
-        self.canvas.yview_moveto(1.0)
+        try:
+            self.canvas.update_idletasks()
+            self.canvas.yview_moveto(1.0)
+        except tk.TclError:
+            pass
 
 
 class StyledPanel(tk.Toplevel):
@@ -144,6 +195,7 @@ class Chat77App(tk.Tk):
         self._current_mode = None
         self._connecting = False
         self._online_users_callback = None
+        self._emoji_popup = None
 
         self._build_login_screen()
 
@@ -229,7 +281,10 @@ class Chat77App(tk.Tk):
                 self.sock.sendall((text + "\n").encode())
             return True
         except Exception as ex:
-            self.after(0, self._system_msg, f"Network send failed: {ex}")
+            try:
+                self.after(0, self._system_msg, f"Network send failed: {ex}")
+            except Exception:
+                pass
             return False
 
     def _recv_line_sync(self):
@@ -258,6 +313,7 @@ class Chat77App(tk.Tk):
             self._safe_send("exit")
         except Exception:
             pass
+        self._close_emoji_picker()
         self._cleanup_sockets()
         self.destroy()
 
@@ -350,29 +406,33 @@ class Chat77App(tk.Tk):
         self.login_status.config(text="Connecting…", fg=FG_SECONDARY)
         self.update()
 
-        self._cleanup_sockets()
+        need_new_socket = self.sock is None
 
-        try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((ip, 22081))
-            self.recv_buffer = b""
-        except Exception as ex:
-            self.login_status.config(text=f"Cannot connect: {ex}", fg="#CC3333")
-            self._connecting = False
+        if need_new_socket:
             self._cleanup_sockets()
-            return
 
-        try:
-            self.beep_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.beep_sock.bind(("", 0))
-            self._beep_port = self.beep_sock.getsockname()[1]
-        except Exception as ex:
-            self.login_status.config(text=f"UDP setup failed: {ex}", fg="#CC3333")
-            self._connecting = False
-            self._cleanup_sockets()
-            return
+            try:
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.connect((ip, 22081))
+                self.recv_buffer = b""
+            except Exception as ex:
+                self.login_status.config(text=f"Cannot connect: {ex}", fg="#CC3333")
+                self._connecting = False
+                self._cleanup_sockets()
+                return
 
-        ok = self._authenticate(user, pwd, mode)
+            try:
+                self.beep_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.beep_sock.bind(("", 0))
+                self._beep_port = self.beep_sock.getsockname()[1]
+            except Exception as ex:
+                self.login_status.config(text=f"UDP setup failed: {ex}", fg="#CC3333")
+                self._connecting = False
+                self._cleanup_sockets()
+                return
+
+        ok, retryable = self._authenticate(user, pwd, mode)
+
         if ok:
             self.aliase = user
             self._load_histories()
@@ -383,7 +443,8 @@ class Chat77App(tk.Tk):
             threading.Thread(target=self._recv_loop, daemon=True).start()
             threading.Thread(target=self._beep_loop, daemon=True).start()
         else:
-            self._cleanup_sockets()
+            if not retryable:
+                self._cleanup_sockets()
 
         self._connecting = False
 
@@ -395,34 +456,44 @@ class Chat77App(tk.Tk):
                 msg = self._recv_line_sync()
                 if msg is None:
                     self.login_status.config(text="Connection lost during auth.", fg="#CC3333")
-                    return False
+                    return False, False
             except Exception:
                 self.login_status.config(text="Connection lost during auth.", fg="#CC3333")
-                return False
+                return False, False
 
             if msg.startswith("Authorise MODE"):
-                self._safe_send(current_mode)
+                if not self._safe_send(current_mode):
+                    return False, False
 
             elif msg == "ALIAS?":
-                self._safe_send(user)
+                if not self._safe_send(user):
+                    return False, False
 
             elif msg == "PASSWORD?":
-                self._safe_send(pwd)
+                if not self._safe_send(pwd):
+                    return False, False
+
+            elif msg.startswith("ERROR: Invalid alias or password"):
+                self.login_status.config(
+                    text="Invalid alias or password. Correct it and press Connect again.",
+                    fg="#CC3333"
+                )
+                return False, True
 
             elif msg.startswith("ERROR:"):
                 self.login_status.config(text=msg, fg="#CC3333")
-                return False
+                return False, True
 
             elif msg == "This alias is already logged in":
                 self.login_status.config(text=msg, fg="#CC3333")
-                return False
+                return False, True
 
             elif msg == "Registration successful. You can login now.":
                 self.login_status.config(text="Registered successfully. Logging in…", fg=FG_BLUE)
                 current_mode = "LOGIN"
 
             elif msg in ("AUTH_SUCCESS", "SUCCESSFULLY AUTHENTICATE"):
-                return True
+                return True, False
 
             else:
                 self.login_status.config(text=msg, fg=FG_SECONDARY)
@@ -518,8 +589,6 @@ class Chat77App(tk.Tk):
             self._add_sidebar_item(f"private:{p}", p, "Private chat")
         if self.private_partners:
             self._select_chat(f"private:{sorted(self.private_partners)[0]}")
-        elif "broadcast" in self.chat_histories:
-            pass
 
     def _open_group_ui(self):
         self._destroy_mode_frame()
@@ -739,6 +808,13 @@ class Chat77App(tk.Tk):
         send_btn.bind("<Button-1>", self._send_message_event)
         send_btn.bind("<Enter>", lambda e: send_btn.config(fg=FG_PRIMARY))
         send_btn.bind("<Leave>", lambda e: send_btn.config(fg=FG_BLUE))
+
+        emoji_btn = tk.Label(input_inner, text="😊", font=("Segoe UI Emoji", 14),
+                             bg=BG_INPUT, fg=FG_SECONDARY, cursor="hand2", padx=6)
+        emoji_btn.pack(side="right")
+        emoji_btn.bind("<Button-1>", lambda e: self._show_emoji_picker())
+        emoji_btn.bind("<Enter>", lambda e: emoji_btn.config(fg=FG_PRIMARY))
+        emoji_btn.bind("<Leave>", lambda e: emoji_btn.config(fg=FG_SECONDARY))
 
     # ──────────────────────────────────────────────────────────────────────
     # SIDEBAR ITEMS + UNREAD
@@ -1029,6 +1105,73 @@ class Chat77App(tk.Tk):
             self._system_msg(f"Send error: {ex}")
 
     # ──────────────────────────────────────────────────────────────────────
+    # EMOJIS
+    # ──────────────────────────────────────────────────────────────────────
+    def _insert_emoji(self, emoji):
+        try:
+            self.msg_entry.insert("insert", emoji)
+            self.msg_entry.focus_set()
+        except Exception:
+            pass
+
+    def _close_emoji_picker(self):
+        if self._emoji_popup and self._emoji_popup.winfo_exists():
+            self._emoji_popup.destroy()
+        self._emoji_popup = None
+
+    def _show_emoji_picker(self):
+        if self._emoji_popup and self._emoji_popup.winfo_exists():
+            self._close_emoji_picker()
+            return
+
+        self._emoji_popup = tk.Toplevel(self)
+        self._emoji_popup.title("Emojis")
+        self._emoji_popup.resizable(False, False)
+        self._emoji_popup.configure(bg=BG_CARD)
+        self._emoji_popup.transient(self)
+
+        emojis = [
+            "😀", "😂", "😍", "😎", "🥳", "😭", "🔥", "👍",
+            "👏", "🙏", "💯", "❤️", "💙", "💔", "😡", "🤔",
+            "🙌", "👌", "🎉", "📎", "✅", "❌", "👀", "😅"
+        ]
+
+        outer = tk.Frame(self._emoji_popup, bg=BG_CARD, padx=10, pady=10)
+        outer.pack()
+
+        cols = 6
+        for i, emo in enumerate(emojis):
+            btn = tk.Button(
+                outer,
+                text=emo,
+                font=("Segoe UI Emoji", 14),
+                width=3,
+                relief="flat",
+                bg=BG_SEARCH,
+                activebackground=BG_ITEM_HVR,
+                command=lambda e=emo: self._insert_emoji(e)
+            )
+            btn.grid(row=i // cols, column=i % cols, padx=4, pady=4)
+
+        close_btn = tk.Button(
+            outer,
+            text="Close",
+            font=FONT_SMALL,
+            relief="flat",
+            bg=FG_BLUE,
+            fg="white",
+            activebackground=_lighten(FG_BLUE),
+            command=self._close_emoji_picker
+        )
+        close_btn.grid(row=(len(emojis) + cols - 1) // cols + 1, column=0, columnspan=cols,
+                       pady=(8, 0), sticky="ew")
+
+        self._emoji_popup.update_idletasks()
+        x = self.winfo_x() + self.winfo_width() - self._emoji_popup.winfo_width() - 40
+        y = self.winfo_y() + self.winfo_height() - self._emoji_popup.winfo_height() - 110
+        self._emoji_popup.geometry(f"+{x}+{y}")
+
+    # ──────────────────────────────────────────────────────────────────────
     # STYLED PANELS
     # ──────────────────────────────────────────────────────────────────────
     def _show_connect_panel(self):
@@ -1044,6 +1187,7 @@ class Chat77App(tk.Tk):
         e.focus_set()
         st = tk.Label(panel.card, text="", font=FONT_SMALL, bg=BG_CARD, fg="#CC3333")
         st.pack(anchor="w", pady=(4, 0))
+
         def do_connect():
             name = e.get().strip()
             if not name:
@@ -1051,6 +1195,7 @@ class Chat77App(tk.Tk):
                 return
             self._safe_send(f"connect to {name}")
             panel.destroy()
+
         br = tk.Frame(panel.card, bg=BG_CARD)
         br.pack(fill="x", pady=(14, 0))
         RoundedButton(br, "Connect", do_connect, bg=ACCENT_PRIVATE, width=120, height=36).pack(side="left")
@@ -1078,8 +1223,10 @@ class Chat77App(tk.Tk):
                 tk.Label(container, text="No other users are online right now.",
                          font=FONT_BODY, bg=BG_CARD, fg=FG_SECONDARY).pack(pady=20)
                 return
+
             sf = ScrollableFrame(container, bg=BG_CARD)
             sf.pack(fill="both", expand=True)
+
             for user in sorted(users):
                 row = tk.Frame(sf.inner, bg=BG_CARD, cursor="hand2")
                 row.pack(fill="x", pady=2)
@@ -1091,10 +1238,12 @@ class Chat77App(tk.Tk):
                 cl = tk.Label(row, text="Connect →", font=FONT_SMALL, bg=BG_CARD, fg=FG_BLUE)
                 cl.pack(side="right", padx=8)
                 tk.Frame(sf.inner, bg="#EBF1F8", height=1).pack(fill="x")
+
                 def _conn(u=user):
                     self._safe_send(f"connect to {u}")
                     if panel.winfo_exists():
                         panel.destroy()
+
                 for w in (row, av, nm, cl):
                     w.bind("<Button-1>", lambda e, u=user: _conn(u))
                     w.bind("<Enter>", lambda e, r=row, n=nm, c=cl:
@@ -1118,6 +1267,7 @@ class Chat77App(tk.Tk):
         e.focus_set()
         st = tk.Label(panel.card, text="", font=FONT_SMALL, bg=BG_CARD, fg="#CC3333")
         st.pack(anchor="w", pady=(4, 0))
+
         def do_create():
             name = e.get().strip()
             if not name:
@@ -1125,6 +1275,7 @@ class Chat77App(tk.Tk):
                 return
             self._safe_send(f"create group {name}")
             panel.destroy()
+
         br = tk.Frame(panel.card, bg=BG_CARD)
         br.pack(fill="x", pady=(14, 0))
         RoundedButton(br, "Create", do_create, bg=ACCENT_GROUP, width=120, height=36).pack(side="left")
@@ -1142,8 +1293,10 @@ class Chat77App(tk.Tk):
                      text="You haven't joined any groups yet.\nUse 'Create New Group' to get started.",
                      font=FONT_BODY, bg=BG_CARD, fg=FG_SECONDARY, justify="center").pack(pady=30)
             return
+
         sf = ScrollableFrame(panel.card, bg=BG_CARD)
         sf.pack(fill="both", expand=True)
+
         for g in sorted(self.groups):
             row = tk.Frame(sf.inner, bg=BG_CARD, cursor="hand2")
             row.pack(fill="x", pady=2)
@@ -1155,11 +1308,13 @@ class Chat77App(tk.Tk):
             ol = tk.Label(row, text="Open →", font=FONT_SMALL, bg=BG_CARD, fg=FG_BLUE)
             ol.pack(side="right", padx=8)
             tk.Frame(sf.inner, bg="#EBF1F8", height=1).pack(fill="x")
+
             def _open(grp=g):
                 key = f"group:{grp}"
                 self._add_sidebar_item(key, grp, "Group chat")
                 self._select_chat(key)
                 panel.destroy()
+
             for w in (row, av, nm, ol):
                 w.bind("<Button-1>", lambda e, gn=g: _open(gn))
                 w.bind("<Enter>", lambda e, r=row, n=nm, o=ol:
@@ -1190,7 +1345,8 @@ class Chat77App(tk.Tk):
             self._show_styled_popup(
                 f"🔔  {requester} wants to chat privately.",
                 [("Accept", lambda r=requester: self._accept_conn(r), ACCENT_GROUP),
-                 ("Reject", lambda r=requester: self._reject_conn(r), "#CC3333")])
+                 ("Reject", lambda r=requester: self._reject_conn(r), "#CC3333")]
+            )
             return
 
         if msg.startswith("PRIVATE_CONNECTED:"):
@@ -1222,7 +1378,8 @@ class Chat77App(tk.Tk):
                 self._show_styled_popup(
                     f"👥  {inviter} invited you to group '{gname}'.",
                     [("Join", lambda g=gname: self._accept_group(g), ACCENT_GROUP),
-                     ("Decline", lambda g=gname: self._reject_group(g), "#CC3333")])
+                     ("Decline", lambda g=gname: self._reject_group(g), "#CC3333")]
+                )
             return
 
         if msg.startswith("GROUP_JOINED:"):
@@ -1326,8 +1483,10 @@ class Chat77App(tk.Tk):
 
         if msg.startswith("Online clients:"):
             names = msg.split(":", 1)[1].strip()
-            self.online_users = (set(u.strip() for u in names.split(",") if u.strip())
-                                 if names and names != "No clients online." else set())
+            self.online_users = (
+                set(u.strip() for u in names.split(",") if u.strip())
+                if names and names != "No clients online." else set()
+            )
             cb = self._online_users_callback
             if cb:
                 self._online_users_callback = None
@@ -1411,11 +1570,13 @@ class Chat77App(tk.Tk):
                 tid = str(uuid.uuid4())
                 chunk_size = 400
                 total = (len(data) + chunk_size - 1) // chunk_size
+
                 self._safe_send(f"FILE_START|{target}|{filename}|{len(data)}|{tid}")
                 for i in range(total):
                     encoded = base64.b64encode(data[i * chunk_size:(i + 1) * chunk_size]).decode()
                     self._safe_send(f"FILE_CHUNK|{target}|{tid}|{i}|{encoded}")
                 self._safe_send(f"FILE_END|{target}|{tid}|{total}")
+
                 self.after(0, self._system_msg, f"📎 Sent {filename} to {target}", f"private:{target}")
             except Exception as ex:
                 self.after(0, self._system_msg, f"File send error: {ex}")
@@ -1459,11 +1620,13 @@ class Chat77App(tk.Tk):
                      insertbackground=FG_PRIMARY, relief="flat", bd=0)
         e.pack(fill="x", padx=10, pady=8)
         e.focus_set()
+
         def do_invite():
             user = e.get().strip()
             if user:
                 self._safe_send(f"invite group {gname} {user}")
             panel.destroy()
+
         br = tk.Frame(panel.card, bg=BG_CARD)
         br.pack(fill="x", pady=(14, 0))
         RoundedButton(br, "Invite", do_invite, bg=ACCENT_GROUP, width=100, height=36).pack(side="left")
@@ -1503,6 +1666,7 @@ class Chat77App(tk.Tk):
             self._safe_send("exit")
         except Exception:
             pass
+        self._close_emoji_picker()
         self._on_close()
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1520,6 +1684,7 @@ class Chat77App(tk.Tk):
         card.pack(fill="both", expand=True, padx=10, pady=10)
         tk.Label(card, text=message, font=FONT_BODY, bg=BG_CARD, fg=FG_PRIMARY,
                  wraplength=340, justify="left").pack(anchor="w", pady=(0, 16))
+
         if buttons:
             br = tk.Frame(card, bg=BG_CARD)
             br.pack(anchor="w")
@@ -1533,6 +1698,7 @@ class Chat77App(tk.Tk):
         else:
             RoundedButton(card, "OK", popup.destroy,
                           bg=ACCENT_GROUP, width=80, height=32).pack(anchor="w")
+
         popup.update_idletasks()
         px = self.winfo_x() + (self.winfo_width() - popup.winfo_width()) // 2
         py = self.winfo_y() + (self.winfo_height() - popup.winfo_height()) // 2

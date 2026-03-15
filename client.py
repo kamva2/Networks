@@ -8,7 +8,7 @@ server_ip = input("Enter server IP address: ").strip()
 
 
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect((server_ip, 22081))
+client.connect((server_ip, 55555))
 
 # UDP socket for receiving beep notifications
 beep_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
