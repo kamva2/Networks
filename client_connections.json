@@ -1,44 +1,44 @@
 {
     "users": [
         {
-            "aliase": "anele",
-            "username": "anele",
-            "password": "anele",
-            "created_at": "2026-03-14 12:51:07"
-        },
-        {
             "aliase": "hope",
             "username": "hope",
             "password": "mbatha",
-            "created_at": "2026-03-14 12:51:35"
+            "created_at": "2026-03-15 10:56:28"
+        },
+        {
+            "aliase": "anele",
+            "username": "anele",
+            "password": "ngxongo",
+            "created_at": "2026-03-15 10:57:12"
         },
         {
             "aliase": "lwandile",
             "username": "lwandile",
-            "password": "mesuli",
-            "created_at": "2026-03-14 12:59:38"
+            "password": "shabangu",
+            "created_at": "2026-03-15 11:05:33"
         }
     ],
     "connections": [
         {
-            "aliase": "anele",
+            "aliase": "hope",
             "ip_address": "127.0.0.1",
-            "port": 53075,
-            "login_time": "2026-03-14 12:51:18",
+            "port": 52459,
+            "login_time": "2026-03-15 10:56:36",
             "logout_time": null
         },
         {
-            "aliase": "hope",
+            "aliase": "anele",
             "ip_address": "127.0.0.1",
-            "port": 56090,
-            "login_time": "2026-03-14 12:51:43",
-            "logout_time": null
+            "port": 52462,
+            "login_time": "2026-03-15 10:57:27",
+            "logout_time": "2026-03-15 11:11:29"
         },
         {
             "aliase": "lwandile",
             "ip_address": "127.0.0.1",
-            "port": 53150,
-            "login_time": "2026-03-14 12:59:56",
+            "port": 57787,
+            "login_time": "2026-03-15 11:05:43",
             "logout_time": null
         }
     ]
