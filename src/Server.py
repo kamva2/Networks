@@ -7,6 +7,7 @@ port = 22081
 
 # Create the TCP server socket
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+# Set socket options to allow address reuse, which helps avoid "Address already in use" errors on restart
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind((host, port))
 server.listen()
@@ -61,7 +62,7 @@ def get_client_by_alias(aliase):
     return clients[index]
 
 
-# This is the function that sends a message to a specific client based on their aliase
+# This is the function that sends a message to a specific client based on their alias. 
 def send_to_alias(aliase, message):
     target_client = get_client_by_alias(aliase)
     if target_client is None:
